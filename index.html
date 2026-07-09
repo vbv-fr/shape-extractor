@@ -157,6 +157,33 @@
   .modal .mb{padding:16px;font-size:13px;line-height:1.5;color:#42474c;}
   .modal .mf{display:flex;justify-content:flex-end;gap:9px;padding:12px 16px;border-top:1px solid #eef0f1;}
 
+  /* ===== Edge · Edit Module Configurations ===== */
+  .emc{flex:1;display:flex;flex-direction:column;min-height:0;}
+  .emc-crumbs{display:flex;align-items:center;gap:7px;padding:8px 16px;font-size:12px;color:var(--muted);background:#fafbfc;border-bottom:1px solid var(--line);}
+  .emc-crumbs b{color:var(--ink);font-weight:600;}
+  .emc-selectors{display:flex;gap:14px;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+  .emc-selectors .fld{display:flex;flex-direction:column;gap:4px;min-width:210px;}
+  .emc-selectors .fld.grow{flex:1;min-width:260px;}
+  .emc-selectors label{font-size:11px;font-weight:700;color:#3d4247;}
+  .emc-body{flex:1;min-height:0;display:flex;overflow:hidden;}
+  .emc-split{flex:1;display:flex;min-height:0;}
+  .emc-config{width:400px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--line);background:#fff;}
+  .emc-canvas{flex:1;min-width:0;background:#eceef0;position:relative;display:flex;flex-direction:column;}
+  .emc-dim{flex:1;overflow-y:auto;padding:16px 18px;background:#fff;}
+  .emc-foot{display:flex;justify-content:flex-end;gap:10px;padding:11px 16px;border-top:1px solid var(--line-d);background:#fff;flex-shrink:0;}
+  .btn.sm{padding:7px 20px;font-size:12.5px;}
+  .roinput{width:100%;border:1px solid var(--line-d);border-radius:6px;padding:7px 9px;background:#f2f4f5;color:#7b8085;cursor:not-allowed;font-size:12px;}
+  .lockrow{display:flex;align-items:center;gap:5px;font-size:10px;color:#9aa0a6;font-weight:700;text-transform:uppercase;letter-spacing:.3px;}
+  .dimcard{border:1px solid var(--line);border-radius:9px;padding:14px;margin-bottom:14px;}
+  .dimcard .dh{font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+  .dimcard .dh .chip.num{width:19px;height:19px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;}
+  .gtgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .feat{display:flex;gap:8px;}
+  .feat .roinput{flex:1;}
+  .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:16px;line-height:1.45;}
+  .banner.warn{background:#fdECe8;color:#b8341f;border:1px solid #f3c4b8;}
+  .banner.ok{background:#eef7ea;color:var(--green-d);border:1px solid #cdeabf;}
+
   .edge-stub{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted);padding:40px;text-align:center;}
   .edge-stub .big{font-size:20px;font-weight:700;color:var(--ink);}
   .edge-stub .tag{background:#fff3ee;color:var(--orange);border:1px solid #f2c9b9;padding:5px 12px;border-radius:20px;font-weight:700;font-size:12px;}
@@ -1014,17 +1041,296 @@ function VisionConfig({ toast }) {
   );
 }
 
-/* ================= EDGE stub ================= */
-function EdgeConfig() {
+/* ================= EDGE · EDIT MODULE CONFIGURATIONS ================= */
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const DIM_TYPES = ['Angle', 'Distance', 'Area', 'Length', 'Convexity', 'ContourContinuity'];
+
+function seedEdgeShapes() {
+  const mk = (type, name, coords, extra) => {
+    const s = makeShape(type, name); s.drawn = true; s.generated = true; s.coords = coords;
+    if (extra) Object.assign(s, extra); return s;
+  };
+  return [
+    mk('circle', 'Circle_1', { cx: 250, cy: 190, r: 90 }),
+    mk('line', 'Line_1', { sx: 150, sy: 120, ex: 360, ey: 250, angle: 32 }),
+    mk('ellipse', 'Ellipse_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 }, { mode: 'segmentation', classMask: 'm1' }),
+  ];
+}
+function seedDims() {
+  return [
+    { id: 'd1', order: 1, type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre',
+      shapeOneName: 'Circle_1', shapeOneSelector: 'Centre', shapeOneEdgePoint: '',
+      shapeTwoName: 'Line_1', shapeTwoSelector: 'Middle', shapeTwoEdgePoint: '',
+      operator: 1, targetValue: 42, tolerance: 0.5, unit: 'mm', ratio: 0.05 },
+    { id: 'd2', order: 2, type: 1, shapeOneName: 'Line_1', shapeOneSelector: 'Angle',
+      shapeTwoName: 'Ellipse_1', shapeTwoSelector: 'Major axis',
+      operator: 1, targetValue: 90, tolerance: 1, unit: '°', ratio: 1 },
+    { id: 'd3', order: 3, type: 3, shapeOneName: 'Circle_1', shapeOneSelector: '',
+      operator: 2, targetValue: 24500, tolerance: 300, unit: 'mm²', ratio: 0.05 },
+  ];
+}
+
+// One read-only-identity, editable-params shape card (Edge side)
+function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
+  const spec = SHAPES[shape.type];
+  const set = (patch) => onChange({ ...shape, ...patch });
+  const perUnit = spec.perUnit;
+  const curUnit = perUnit ? shape.units[shape.selUnit] : null;
+  const coordDefs = spec.coordsByCaliper ? spec.coordsByCaliper[shape.caliperType] : spec.coords;
+  const shownCoords = perUnit && perUnit.perCoords ? curUnit.coords : shape.coords;
+  const setCoord = (k, v) => {
+    if (perUnit && perUnit.perCoords) {
+      const units = shape.units.map((u, i) => i === shape.selUnit ? { ...u, coords: { ...u.coords, [k]: Number(v) } } : u);
+      set({ units });
+    } else set({ coords: { ...shape.coords, [k]: Number(v) } });
+  };
+  const unitPatch = (field, patch) => {
+    const units = shape.units.map((u, i) => i === shape.selUnit ? { ...u, [field]: { ...u[field], ...patch } } : u);
+    set({ units });
+  };
   return (
-    <div className="edge-stub">
-      <span className="tag">Frinks Edge · Edit Module Configurations</span>
-      <div className="big">Coming next</div>
-      <ul>
-        <li>🔧 <b>Editable Shape Extractor parameters</b> — the subset of caliper / boundary values that can be altered post-deployment.</li>
-        <li>📐 <b>Dimensioning</b> — author which distances / angles are computed <b>between which shapes</b> (shape-A feature ↔ shape-B feature).</li>
-      </ul>
-      <div style={{ fontSize: 12 }}>Dimensioning lives here on Edge, not in Vision. Use the switch at the top to return to the Vision module configuration.</div>
+    <div className={'shapecard' + (selected ? ' sel' : '')}>
+      <div className="sc-hdr" onClick={onSelect}>
+        <div className="t"><span className="chip num">{idx + 1}</span>{shape.name}</div>
+        <div className="lockrow">🔒 identity locked</div>
+      </div>
+      {selected && (
+        <div className="sc-body">
+          {/* Read-only identity */}
+          <div className="row2 field">
+            <div><span className="tinylab">Shape</span><input className="roinput" value={spec.label} readOnly /></div>
+            <div><span className="tinylab">Shape Name</span><input className="roinput" value={shape.name} readOnly /></div>
+          </div>
+          <div className="row2 field">
+            <div><span className="tinylab">Mode</span><input className="roinput" value={shape.mode === 'segmentation' ? 'Segmentation Class' : 'Direct (Image / SA)'} readOnly /></div>
+            {spec.hasCaliperType && <div><span className="tinylab">Caliper Type</span><input className="roinput" value={shape.caliperType} readOnly /></div>}
+          </div>
+          {shape.mode === 'segmentation' && (
+            <div className="field"><span className="tinylab">Segmentation Class Mask</span>
+              <input className="roinput" value={(CLASS_MASKS.find((m) => m.id === shape.classMask) || {}).label || ''} readOnly /></div>
+          )}
+
+          {/* Editable coordinates */}
+          <div className="field">
+            <div className="block-t">{spec.coordTitle}{perUnit && perUnit.perCoords ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+            {perUnit && perUnit.perCoords && (
+              <div className="boxtabs">{shape.units.map((_, i) => <button key={i} className={shape.selUnit === i ? 'on' : ''} onClick={() => set({ selUnit: i })}>{perUnit.label} {i + 1}</button>)}</div>
+            )}
+            <div className="row3">
+              {(perUnit && perUnit.perCoords ? spec.coords : coordDefs).map(([k, lab]) => (
+                <div key={k}><span className="tinylab">{lab}</span>
+                  <input className="inp" type="number" value={shownCoords[k] ?? 0} onChange={(e) => setCoord(k, e.target.value)} /></div>
+              ))}
+            </div>
+          </div>
+
+          {/* Editable caliper params */}
+          {spec.caliperParams.length > 0 ? (
+            <div className="field">
+              <div className="block-t">Caliper Parameters{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+              <div className="row2">
+                {spec.caliperParams.map((k) => {
+                  const meta = CALIPER_PARAM_META[k];
+                  const usePer = perUnit && perUnit.perCaliper;
+                  const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
+                  const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
+                  return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
+                })}
+              </div>
+              {spec.caliperNote && <div className="hint">{spec.caliperNote}</div>}
+            </div>
+          ) : (
+            <div className="field"><span className="miniauto">No caliper-count parameter for {spec.label} — calipers auto-generated.</span></div>
+          )}
+
+          {/* Editable boundary params */}
+          <div className="field">
+            <div className="block-t">Boundary Parameters{perUnit ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+            {perUnit && !perUnit.perCoords && (
+              <div className="boxtabs">{shape.units.map((_, i) => <button key={i} className={shape.selUnit === i ? 'on' : ''} onClick={() => set({ selUnit: i })}>{perUnit.label} {i + 1}</button>)}</div>
+            )}
+            <BoundaryEditor spec={spec} boundary={perUnit ? curUnit.boundary : shape.boundary}
+              patch={(p) => perUnit ? unitPatch('boundary', p) : set({ boundary: { ...shape.boundary, ...p } })} />
+          </div>
+
+          {spec.general.length > 0 && (
+            <div className="field">
+              <div className="block-t">General <span className="ln" /></div>
+              {spec.general.map(([k, lab, sub]) => (
+                <NumberField key={k} label={lab} sub={sub} value={shape.general[k]} min={0} max={180}
+                  onChange={(v) => set({ general: { ...shape.general, [k]: v } })} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
+  const active = shapes.find((s) => s.id === sel) || shapes[0];
+  const update = (ns) => { setShapes((p) => p.map((s) => s.id === ns.id ? ns : s)); onDirty(); };
+  const onRotate = (angle) => update({ ...active, coords: { ...active.coords, angle } });
+  return (
+    <div className="emc-split">
+      <div className="emc-config">
+        <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--muted)' }}>
+          Shape identity (shape, name, mode, caliper type) is locked — authored in Vision. Tune coordinates, caliper &amp; boundary parameters here.
+        </div>
+        {shapes.map((s, i) => (
+          <EdgeShapeCard key={s.id} shape={s} idx={i} selected={s.id === sel} onSelect={() => setSel(s.id)} onChange={update} />
+        ))}
+      </div>
+      <div className="emc-canvas">
+        <div className="canvas-tools">
+          <div className="ct">◳ Fit</div><div className="ct">⤢ Zoom</div>
+          <div className="ct" style={{ color: 'var(--orange)' }}>▧ {active ? active.name : ''}</div>
+        </div>
+        <Canvas activeShape={active} segMode={active && active.mode === 'segmentation'} arming={false} onDrawn={() => {}} onRotate={onRotate} />
+      </div>
+    </div>
+  );
+}
+
+function EdgeDimensioning({ dims, setDims, onDirty }) {
+  const change = (i, k, v) => { setDims((p) => p.map((d, idx) => idx === i ? { ...d, [k]: v } : d)); onDirty(); };
+  return (
+    <div className="emc-dim">
+      {dims.length === 0
+        ? <div className="banner warn">⚠ No dimensioning configured for this capture. A Shape Extractor capture with no dimensioning rules <b>cannot be deployed</b> — add at least one rule before deploying.</div>
+        : <div className="banner ok">✓ {dims.length} dimensioning rule{dims.length > 1 ? 's' : ''} set. Dimensions are computed between the Shape Extractor shapes of this capture. Rule structure is authored with the shapes; here you tune the ground-truth targets.</div>}
+      {dims.map((dim, index) => {
+        const single = [3, 5, 6].includes(dim.type);
+        const noGT = [5, 6].includes(dim.type);
+        return (
+          <div className="dimcard" key={dim.id}>
+            <div className="dh"><span className="chip num">{dim.order || index + 1}</span>Dimensioning {dim.order || index + 1}</div>
+            <div className="row3" style={{ marginBottom: 12 }}>
+              <div><span className="tinylab">Type</span><input className="roinput" value={DIM_TYPES[dim.type - 1] || 'Unknown'} readOnly /></div>
+              {dim.type === 2 && <div><span className="tinylab">Distance Axis</span><input className="roinput" value={dim.distanceAxis || 'N/A'} readOnly /></div>}
+              {dim.type === 2 && dim.distanceAxis === 'euclidean' && <div><span className="tinylab">Euclidean Mode</span><input className="roinput" value={dim.euclideanMode || 'N/A'} readOnly /></div>}
+              {dim.type === 4 && <div><span className="tinylab">Piecewise</span><input className="roinput" value={dim.piecewise ? 'Yes' : 'No'} readOnly /></div>}
+            </div>
+            <div className="field">
+              <span className="tinylab">Feature A</span>
+              <div className="feat">
+                <input className="roinput" value={dim.shapeOneName || 'Shape'} readOnly />
+                {!single && <input className="roinput" value={dim.shapeOneSelector || ''} readOnly />}
+                {dim.shapeOneEdgePoint && <input className="roinput" value={dim.shapeOneEdgePoint} readOnly />}
+              </div>
+            </div>
+            {dim.shapeTwoName && !single && (
+              <div className="field">
+                <span className="tinylab">Feature B</span>
+                <div className="feat">
+                  <input className="roinput" value={dim.shapeTwoName} readOnly />
+                  <input className="roinput" value={dim.shapeTwoSelector || ''} readOnly />
+                  {dim.shapeTwoEdgePoint && <input className="roinput" value={dim.shapeTwoEdgePoint} readOnly />}
+                </div>
+              </div>
+            )}
+            {!noGT && (
+              <>
+                <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
+                <div className="gtgrid">
+                  <div><span className="tinylab">Operator</span>
+                    <select className="sel" value={dim.operator} onChange={(e) => change(index, 'operator', Number(e.target.value))}>
+                      <option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option>
+                    </select>
+                  </div>
+                  <div><span className="tinylab">Value</span>
+                    <input className="inp" type="number" min="0" value={dim.targetValue} onChange={(e) => change(index, 'targetValue', Math.max(0, Number(e.target.value)))} /></div>
+                  <div><span className="tinylab">Tolerance</span>
+                    <input className="inp" type="number" min="0" value={dim.tolerance} onChange={(e) => change(index, 'tolerance', Math.max(0, Number(e.target.value)))} /></div>
+                  <div><span className="tinylab">Unit</span><input className="roinput" value={dim.unit || ''} readOnly /></div>
+                </div>
+                <div className="field" style={{ marginTop: 10 }}>
+                  <span className="tinylab">Ratio (pixel to mm)</span>
+                  <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => change(index, 'ratio', Math.max(0, Number(e.target.value)))} />
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EdgeEMC({ toast }) {
+  const [shapes, setShapes] = useState(seedEdgeShapes);
+  const [dims, setDims] = useState(seedDims);
+  const [sel, setSel] = useState(() => shapes[0].id);
+  const [moduleSel, setModuleSel] = useState('she1');
+  const [dirty, setDirty] = useState(false);
+  const [reviewModal, setReviewModal] = useState(false);
+  const initial = useRef(null);
+  useEffect(() => { initial.current = { shapes: clone(shapes), dims: clone(dims) }; }, []);
+  const markDirty = () => setDirty(true);
+
+  const onSave = () => {
+    const wasShapeEdit = moduleSel === 'she1' && dirty;
+    initial.current = { shapes: clone(shapes), dims: clone(dims) };
+    setDirty(false);
+    if (moduleSel === 'she1') {
+      toast('Shape Extractor changes saved');
+      if (wasShapeEdit) setReviewModal(true);   // PRD: warn dimensioning may have changed
+    } else {
+      toast('Dimensioning changes saved');
+    }
+  };
+  const onReset = () => {
+    if (!initial.current) return;
+    setShapes(clone(initial.current.shapes));
+    setDims(clone(initial.current.dims));
+    setDirty(false);
+  };
+
+  return (
+    <div className="emc">
+      <div className="emc-crumbs">Instances <span>›</span> Inferencing Customization <span>›</span> <b>Edit Module Configurations</b></div>
+      <div className="emc-selectors">
+        <div className="fld grow">
+          <label>Instance <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(Instance · Project · Plant)</span></label>
+          <select className="sel"><option>Line-A Cell 3 · GasketInspect · Plant Pune</option></select>
+        </div>
+        <div className="fld">
+          <label>Variant | Capture</label>
+          <select className="sel"><option>Variant A | Cam 1</option></select>
+        </div>
+        <div className="fld">
+          <label>Module</label>
+          <select className="sel" value={moduleSel} onChange={(e) => setModuleSel(e.target.value)}>
+            <option value="she1">SHE_1 · Shape Extractor</option>
+            <option value="dim">Dimensioning from Shape Extractor</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="emc-body">
+        {moduleSel === 'she1'
+          ? <EdgeShapeEditor shapes={shapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={markDirty} />
+          : <EdgeDimensioning dims={dims} setDims={setDims} onDirty={markDirty} />}
+      </div>
+
+      <div className="emc-foot">
+        <button className="btn btn-ghost sm" disabled={!dirty} onClick={onReset}>Reset</button>
+        <button className="btn btn-primary sm" disabled={!dirty} onClick={onSave}>Save</button>
+      </div>
+
+      {reviewModal && (
+        <div className="overlay" onClick={() => setReviewModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="mh">⚠ Review dimensioning before deploying</div>
+            <div className="mb">You changed a Shape Extractor module. The dimensioning computed from its shapes may have changed as a result. Please review the <b>“Dimensioning from Shape Extractor”</b> section before making any deployments.</div>
+            <div className="mf">
+              <button className="btn btn-ghost" onClick={() => setReviewModal(false)}>Dismiss</button>
+              <button className="btn btn-primary" onClick={() => { setModuleSel('dim'); setReviewModal(false); }}>Review Dimensioning</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1046,7 +1352,7 @@ function App() {
           <button className={view === 'edge' ? 'on' : ''} onClick={() => setView('edge')}><span className="pv edge">EDGE</span> Edit Module Configurations</button>
         </div>
       </div>
-      {view === 'vision' ? <VisionConfig toast={showToast} /> : <EdgeConfig />}
+      {view === 'vision' ? <VisionConfig toast={showToast} /> : <EdgeEMC toast={showToast} />}
       {toast && <div className={'toast' + (toast.warn ? ' warn' : '')}>{toast.warn ? '⚠' : '✓'} {toast.msg}</div>}
     </div>
   );
