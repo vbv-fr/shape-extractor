@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shape Extractor — Frinks Prototype</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --orange:#e8542b; --orange-d:#c8431f; --green:#56b733; --green-d:#489c2a;
+    --ink:#23282c; --muted:#6b7280; --line:#d6d9dc; --line-d:#b4b6b8;
+    --hdr:#e3e5e5; --bg:#f4f5f6; --blue:#2f6fed; --purple:#7c3aed; --red:#e0473a;
+  }
+  html,body{height:100%;}
+  body{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg); font-size:13px; -webkit-font-smoothing:antialiased; }
+  #root{height:100vh;}
+  button{font-family:inherit;cursor:pointer;}
+  select,input{font-family:inherit;font-size:12px;}
+  .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;
+    padding:8px 14px;background:#fff;border-bottom:1px solid var(--line-d);flex-shrink:0;}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:600;font-size:14px;}
+  .brand .dot{width:22px;height:22px;border-radius:6px;background:var(--orange);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;}
+  .crumbs{color:var(--muted);font-size:12px;}
+  .crumbs b{color:var(--ink);font-weight:600;}
+  .switch{display:flex;background:#eef0f2;border:1px solid var(--line);border-radius:9px;padding:3px;gap:3px;}
+  .switch button{border:0;background:transparent;padding:6px 13px;border-radius:7px;font-size:12px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:7px;}
+  .switch button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px #0000001f;}
+  .switch button .pv{font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;background:var(--orange);color:#fff;}
+  .switch button.on .pv.edge{background:var(--green);}
+  .switch button:not(.on) .pv{background:#c3c7cc;}
+
+  .stage{flex:1;display:flex;min-height:0;}
+  .canvas-col{flex:1;min-width:0;background:#eceef0;position:relative;display:flex;flex-direction:column;}
+  .canvas-tools{position:absolute;top:10px;left:10px;display:flex;gap:6px;z-index:5;}
+  .canvas-tools .ct{background:#fff;border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:11px;font-weight:600;color:var(--ink);box-shadow:0 1px 2px #0000000f;}
+  .canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:26px;min-height:0;}
+  .frame{border:3px solid var(--orange);border-radius:4px;background:#11151a;box-shadow:0 6px 24px #0003;position:relative;}
+  .frame .flabel{position:absolute;top:-11px;left:12px;background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:1px 8px;border-radius:3px;letter-spacing:.3px;}
+  .drawhint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:#111826de;color:#fff;
+    font-size:11px;padding:6px 12px;border-radius:20px;z-index:5;display:flex;gap:7px;align-items:center;white-space:nowrap;}
+  .drawhint.arm{background:#e8542bee;}
+  .drawhint .k{background:#ffffff2b;padding:1px 6px;border-radius:4px;font-weight:700;}
+
+  .flow-col{width:172px;flex-shrink:0;background:#f8f9fa;border-left:1px solid var(--line);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;gap:0;padding:20px 0;overflow-y:auto;}
+  .fnode{width:118px;border:1px solid #cfd3d7;background:#fff;border-radius:7px;padding:8px 6px;text-align:center;font-size:11px;position:relative;}
+  .fnode .ft{font-weight:600;}
+  .fnode .fs{font-size:9px;color:var(--muted);margin-top:1px;}
+  .fnode.master{background:#eef4ff;border-color:#b9d0ff;}
+  .fnode.done{border-color:var(--green);}
+  .fnode.done .badge{position:absolute;top:-6px;right:-6px;width:15px;height:15px;border-radius:50%;background:var(--green);color:#fff;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:800;}
+  .fnode.sel{border-color:var(--orange);box-shadow:0 0 0 2px #e8542b33;}
+  .fconn{width:2px;height:16px;background:#cfd3d7;}
+
+  .pane{width:360px;flex-shrink:0;background:#fff;display:flex;flex-direction:column;box-shadow:-2px 0 10px #00000018;height:100%;}
+  .pane-hdr{display:flex;align-items:center;justify-content:space-between;background:var(--hdr);padding:10px 12px;font-size:16px;font-weight:600;}
+  .pane-hdr .x{font-size:15px;color:#555;cursor:pointer;line-height:1;}
+  .pane-hdr .ic{display:flex;align-items:center;gap:7px;}
+  .pane-hdr .ic .sq{width:18px;height:18px;border-radius:4px;background:var(--orange);}
+  .stepper{display:flex;gap:8px;align-items:center;background:#fff;padding:7px 12px;border-bottom:1px solid #111;font-size:11.5px;}
+  .stepper .st{color:#9aa0a6;}
+  .stepper .st.active{color:var(--ink);font-weight:700;}
+  .stepper .sep{color:#c3c7cc;}
+  .pane-body{flex:1;overflow-y:auto;padding:0;}
+  .pane-foot{display:flex;justify-content:center;gap:10px;padding:11px;border-top:1px solid var(--line);background:#fff;}
+
+  .btn{border:0;border-radius:22px;padding:8px 22px;font-size:13px;font-weight:600;}
+  .btn-primary{background:var(--orange);color:#fff;}
+  .btn-primary:hover{background:var(--orange-d);}
+  .btn-primary:disabled{background:#e6b3a3;cursor:not-allowed;}
+  .btn-ghost{background:#fff;color:var(--ink);border:1px solid var(--line-d);}
+  .btn-ghost:hover{background:#f4f5f6;}
+
+  .sec{padding:14px 14px;border-bottom:1px solid #eef0f1;}
+  .lbl{display:block;font-size:12px;font-weight:600;color:#3d4247;margin-bottom:5px;}
+  .lbl .sub{font-weight:400;color:var(--muted);}
+  .sel,.inp{width:100%;border:1px solid var(--line-d);border-radius:6px;padding:7px 9px;background:#fff;color:var(--ink);}
+  .sel:focus,.inp:focus{outline:none;border-color:var(--orange);}
+  .namewrap{display:flex;align-items:stretch;border:1px solid var(--line-d);border-radius:6px;overflow:hidden;}
+  .namewrap:focus-within{border-color:var(--orange);}
+  .namewrap.dup{border-color:var(--red);}
+  .nameprefix{display:flex;align-items:center;padding:0 8px;background:#f2f4f5;color:var(--muted);font-size:12px;font-weight:700;border-right:1px solid var(--line-d);white-space:nowrap;}
+  .nameinput{flex:1;border:0;padding:7px 9px;font-size:12px;color:var(--ink);outline:none;background:#fff;min-width:0;}
+  .hint{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.4;}
+  .err{font-size:11px;color:var(--red);margin-top:5px;line-height:1.4;display:flex;gap:5px;}
+  .okline{font-size:11px;color:var(--green-d);margin-top:5px;display:flex;gap:5px;align-items:center;font-weight:600;}
+
+  .addbtn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;border:1.5px dashed var(--orange);
+    color:var(--orange);background:#fff6f3;border-radius:8px;padding:9px;font-weight:700;font-size:12.5px;}
+  .addbtn:hover{background:#ffeee8;}
+
+  .shapecard{border:1px solid var(--line);border-radius:9px;margin:12px 14px;overflow:hidden;}
+  .shapecard.sel{border-color:var(--orange);box-shadow:0 0 0 2px #e8542b1f;}
+  .sc-hdr{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;background:#fafbfc;cursor:pointer;border-bottom:1px solid #eef0f1;}
+  .sc-hdr .t{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px;}
+  .sc-hdr .chip.num{width:19px;height:19px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;padding:0;font-size:11px;}
+  .sc-hdr .tools{display:flex;gap:9px;align-items:center;color:var(--muted);}
+  .sc-hdr .tools .del{display:flex;align-items:center;}
+  .sc-hdr .tools .del:hover svg{stroke:var(--red);}
+  .sc-body{padding:12px 12px 14px;}
+  .field{margin-bottom:12px;}
+  .field:last-child{margin-bottom:0;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+  .rowcta{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end;}
+  .modetoggle{display:flex;border:1px solid var(--line-d);border-radius:7px;overflow:hidden;}
+  .modetoggle button{flex:1;border:0;background:#fff;padding:7px;font-size:11.5px;font-weight:600;color:var(--muted);}
+  .modetoggle button.on{background:var(--ink);color:#fff;}
+  .drawbtn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;border:1px solid var(--line-d);
+    background:#fff;border-radius:7px;padding:8px 12px;font-weight:600;font-size:12px;color:var(--ink);white-space:nowrap;}
+  .drawbtn.done{background:#eef7ea;border-color:var(--green);color:var(--green-d);}
+  .drawbtn.armed{background:#fff3ee;border-color:var(--orange);color:var(--orange);}
+  .genbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;border:0;border-radius:7px;
+    padding:9px;font-weight:700;font-size:12.5px;background:var(--green);color:#fff;margin-top:2px;}
+  .genbtn:hover{background:var(--green-d);}
+  .genbtn.dis{background:#cdd2d6;cursor:not-allowed;}
+  .genbtn.re{background:#fff;color:var(--green-d);border:1px solid var(--green);}
+  .miniauto{font-size:10px;color:var(--muted);background:#f2f4f5;border-radius:5px;padding:4px 7px;display:inline-block;}
+  .block-t{font-size:11px;font-weight:700;color:#3d4247;text-transform:uppercase;letter-spacing:.4px;margin:2px 0 8px;display:flex;align-items:center;gap:6px;}
+  .block-t .ln{flex:1;height:1px;background:#eef0f1;}
+  .tinylab{font-size:10.5px;color:var(--muted);margin-bottom:3px;display:block;font-weight:600;}
+  .boxtabs{display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap;}
+  .boxtabs button{border:1px solid var(--line-d);background:#fff;border-radius:6px;padding:5px 9px;font-size:11px;font-weight:600;color:var(--muted);}
+  .boxtabs button.on{background:var(--orange);border-color:var(--orange);color:#fff;}
+
+  .outrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #f1f2f3;}
+  .outrow:last-child{border-bottom:0;}
+  .outrow input{width:15px;height:15px;accent-color:var(--green);}
+  .outrow .on{flex:1;font-size:12px;}
+  .outrow.errrow .on{color:var(--muted);}
+  .outrow .emv{font-size:11px;color:var(--ink);font-weight:600;}
+  .outcard{margin:12px 14px;border:1px solid var(--line);border-radius:9px;overflow:hidden;}
+  .outcard .oh{padding:9px 11px;background:#fafbfc;border-bottom:1px solid #eef0f1;font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:8px;}
+  .outcard .ob{padding:6px 12px 10px;}
+
+  .appbar{display:flex;align-items:center;gap:12px;padding:7px 14px;background:#fff;border-top:1px solid var(--line-d);flex-shrink:0;font-size:12px;}
+  .appbar .pill{background:var(--orange);color:#fff;font-weight:700;padding:3px 10px;border-radius:20px;font-size:11px;}
+  .appbar .steps{display:flex;gap:6px;align-items:center;color:var(--muted);}
+  .appbar .steps .s{padding:2px 9px;border-radius:14px;background:#f0f1f3;}
+  .appbar .steps .s.cur{background:var(--ink);color:#fff;font-weight:600;}
+
+  .toast{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;
+    padding:10px 18px;border-radius:9px;font-weight:600;font-size:13px;box-shadow:0 6px 20px #0003;z-index:60;display:flex;gap:9px;align-items:center;}
+  .toast.warn{background:#e0473a;}
+
+  /* confirm modal */
+  .overlay{position:fixed;inset:0;background:#0006;z-index:70;display:flex;align-items:center;justify-content:center;}
+  .modal{background:#fff;border-radius:12px;width:340px;box-shadow:0 20px 50px #0004;overflow:hidden;}
+  .modal .mh{padding:14px 16px;font-weight:700;font-size:15px;border-bottom:1px solid #eef0f1;display:flex;align-items:center;gap:8px;}
+  .modal .mb{padding:16px;font-size:13px;line-height:1.5;color:#42474c;}
+  .modal .mf{display:flex;justify-content:flex-end;gap:9px;padding:12px 16px;border-top:1px solid #eef0f1;}
+
+  .edge-stub{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted);padding:40px;text-align:center;}
+  .edge-stub .big{font-size:20px;font-weight:700;color:var(--ink);}
+  .edge-stub .tag{background:#fff3ee;color:var(--orange);border:1px solid #f2c9b9;padding:5px 12px;border-radius:20px;font-weight:700;font-size:12px;}
+  .edge-stub ul{text-align:left;line-height:1.9;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:16px 22px;}
+  .edge-stub ul b{color:var(--ink);}
+  svg text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/jsx-source">
+const { useState, useMemo, useCallback, useRef, useEffect, Fragment } = React;
+
+/* ================= SHAPE SPEC ================= */
+const BOUNDARY_TYPES = ['Strongest Edge', 'First Edge', 'Last Edge'];
+const POLARITIES = ['Both', 'Light to Dark', 'Dark to Light'];
+
+const SHAPES = {
+  circle: {
+    label: 'Circle', prefix: 'Circle', drawKind: 'circle', coordTitle: 'Circle Coordinates',
+    hasCaliperType: true, caliperTypes: ['Circle Caliper', 'Sector Caliper'], caliperViz: true,
+    caliperParams: ['number', 'height'], caliperNote: 'Caliper width is auto-derived — calipers evenly distributed around the circle.',
+    coordsByCaliper: {
+      'Circle Caliper': [['cx', 'Centre X'], ['cy', 'Centre Y'], ['r', 'Radius']],
+      'Sector Caliper': [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['r', 'Radius']],
+    },
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true },
+    extras: [], general: [], perUnit: null,
+    outputs: ['Centre', 'Radius', 'Perimeter', 'Area', 'Circularity', 'Convexity', 'Contour Continuity'],
+  },
+  line: {
+    label: 'Line', prefix: 'Line', drawKind: 'line', coordTitle: 'Line Coordinates',
+    hasCaliperType: false, caliperViz: true,
+    caliperParams: ['number', 'width', 'height'], caliperNote: '',
+    coords: [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['angle', 'Angle°']],
+    boundary: { types: [...BOUNDARY_TYPES, 'Close to Mid'], polarity: true, threshold: true, window: true },
+    extras: [], general: [], perUnit: null,
+    outputs: ['Start', 'End', 'Middle', 'Angle'],
+  },
+  ellipse: {
+    label: 'Ellipse', prefix: 'Ellipse', drawKind: 'box', coordTitle: 'Box Coordinates',
+    hasCaliperType: false, caliperViz: false,
+    caliperParams: ['number'], caliperNote: 'Caliper width & height are auto-derived from the box dimensions.',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
+    extras: [['smallAxis', 'Small Ellipse Axis', '0–1 · ratio of small ellipse axis to box length'],
+             ['largeAxis', 'Large Ellipse Axis', '0–1 · ratio of large ellipse axis to box length']],
+    general: [], perUnit: null,
+    outputs: ['Centre', 'Focii', 'Major axis', 'Minor axis', 'Angle'],
+  },
+  quad: {
+    label: 'Quadrilateral', prefix: 'Quadrilateral', drawKind: 'quad', coordTitle: 'Box Coordinates',
+    hasCaliperType: false, caliperViz: false,
+    caliperParams: ['number'], caliperNote: 'Caliper height & caliper width are derived from the box dimensions and number of calipers.',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true },
+    extras: [], general: [],
+    perUnit: { kind: 'box', count: 4, label: 'Box', perCoords: true, perCaliper: true },
+    outputs: ['Start', 'End', 'Middle', 'Angle (per line)', 'Centre (per line)', 'Diagonals'],
+  },
+  parallel: {
+    label: 'Parallel Line Search', prefix: 'ParallelLine', drawKind: 'box', coordTitle: 'Box Coordinates',
+    hasCaliperType: false, caliperViz: false,
+    caliperParams: ['number'], caliperNote: 'Caliper width & height are auto-derived from the box dimensions.',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
+    extras: [], general: [['maxAngleDiff', 'Max Angle Difference', 'degrees · angle difference allowed between the two lines']],
+    perUnit: { kind: 'edge', count: 2, label: 'Edge', perCoords: false, perCaliper: false },
+    outputs: ['Start', 'End', 'Middle', 'Angle (per line)'],
+  },
+  edge: {
+    label: 'Edge Search', prefix: 'EdgeSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
+    hasCaliperType: false, caliperViz: false,
+    caliperParams: [], caliperNote: '',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
+    boundary: { types: [...BOUNDARY_TYPES, 'All'], polarity: true, threshold: true, window: true },
+    extras: [['maxResults', 'Maximum Result Number', 'max number of edges to return']],
+    general: [], perUnit: null,
+    outputs: ['Start', 'End', 'Middle', 'Angle (per line)'],
+  },
+  peak: {
+    label: 'Peak Search', prefix: 'PeakSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
+    hasCaliperType: false, caliperViz: false,
+    caliperParams: [], caliperNote: '',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
+    boundary: { types: null, polarity: true, threshold: true, window: true },
+    extras: [], general: [], perUnit: null, peak: true,
+    outputs: ['Coordinate of the peak point'],
+  },
+};
+const SHAPE_ORDER = ['circle', 'line', 'ellipse', 'quad', 'parallel', 'edge', 'peak'];
+
+const CALIPER_PARAM_META = {
+  number: { label: 'Caliper Number', def: 12, min: 1, max: 200 },
+  height: { label: 'Caliper Height', def: 40, min: 1, max: 400, unit: 'px' },
+  width:  { label: 'Caliper Width', def: 10, min: 1, max: 200, unit: 'px' },
+};
+
+const CLASS_MASKS = [
+  { id: 'm1', label: 'Gasket → Instance 1' },
+  { id: 'm2', label: 'Gasket → Instance 2' },
+  { id: 'm3', label: 'Bore → Instance 1' },
+];
+const SEARCH_AREAS = [
+  { id: 'sa1', label: 'SA_1 · Full Part' },
+  { id: 'sa2', label: 'SA_2 · Flange Region' },
+  { id: 'sa3', label: 'Masked SA · Gasket' },
+];
+
+// mask ROI (segmentation) footprint on the canvas, in svg coords
+const MASK = { cx: 250, cy: 190, r: 92 };
+
+let SEED = 7;
+const rnd = () => (SEED = (SEED * 9301 + 49297) % 233280) / 233280;
+const wob = (i, amp) => (((i * 37 + 11) % 21) / 20 - 0.5) * 2 * amp;  // deterministic wobble
+
+function defaultBoundary(spec) {
+  const b = { polarity: 'Both', threshold: 128, window: 5 };
+  if (spec.boundary.types) b.type = spec.boundary.types[0];
+  spec.extras.forEach(([k]) => { b[k] = k === 'smallAxis' ? 0.4 : k === 'largeAxis' ? 0.9 : k === 'maxResults' ? 8 : 0; });
+  return b;
+}
+function defaultCaliper(spec) { const o = {}; spec.caliperParams.forEach((k) => (o[k] = CALIPER_PARAM_META[k].def)); return o; }
+function defaultGeneral(spec) { const o = {}; spec.general.forEach(([k]) => (o[k] = k === 'maxAngleDiff' ? 5 : 0)); return o; }
+
+function makeShape(typeKey, name) {
+  if (!typeKey) {
+    return { id: 'shp_' + Math.floor(rnd() * 1e6), type: '', name: '', mode: 'direct', classMask: '',
+      caliperType: null, drawn: false, generated: false, offMask: false, coords: {}, caliper: {}, boundary: {}, general: {}, selUnit: 0, units: null };
+  }
+  const spec = SHAPES[typeKey];
+  const s = {
+    id: 'shp_' + Math.floor(rnd() * 1e6), type: typeKey, name: name || '', mode: 'direct', classMask: '',
+    caliperType: spec.hasCaliperType ? spec.caliperTypes[0] : null,
+    drawn: false, generated: false, offMask: false,
+    coords: {}, caliper: defaultCaliper(spec), boundary: defaultBoundary(spec), general: defaultGeneral(spec), selUnit: 0, units: null,
+  };
+  if (spec.perUnit) {
+    s.units = Array.from({ length: spec.perUnit.count }, () => ({
+      coords: {}, caliper: defaultCaliper(spec), boundary: defaultBoundary(spec),
+    }));
+  }
+  return s;
+}
+
+/* ================= GEOMETRY / DRAWING HELPERS ================= */
+function geoToCoords(shape, geo) {
+  const spec = SHAPES[shape.type];
+  if (spec.drawKind === 'circle') {
+    const r = Math.round(Math.hypot(geo.x1 - geo.x0, geo.y1 - geo.y0));
+    const cx = Math.round(geo.x0), cy = Math.round(geo.y0);
+    if (shape.caliperType === 'Sector Caliper') {
+      return { cx, cy, r, sx: cx + r, sy: cy, ex: Math.round(cx + r * Math.cos(2.4)), ey: Math.round(cy + r * Math.sin(2.4)) };
+    }
+    return { cx, cy, r };
+  }
+  if (spec.drawKind === 'line') {
+    const sx = Math.round(geo.x0), sy = Math.round(geo.y0), ex = Math.round(geo.x1), ey = Math.round(geo.y1);
+    return { sx, sy, ex, ey, angle: Math.round(Math.atan2(ey - sy, ex - sx) * 180 / Math.PI) };
+  }
+  // box
+  const cx = Math.round((geo.x0 + geo.x1) / 2), cy = Math.round((geo.y0 + geo.y1) / 2);
+  const w = Math.max(20, Math.round(Math.abs(geo.x1 - geo.x0))), h = Math.max(20, Math.round(Math.abs(geo.y1 - geo.y0)));
+  return { cx, cy, w, h, angle: 0 };
+}
+function quadDefaultUnitsCoords(cx, cy, w, h) {
+  return [
+    { cx, cy: cy - h / 2, w, h: 26, angle: 0 },
+    { cx: cx + w / 2, cy, w: 26, h, angle: 0 },
+    { cx, cy: cy + h / 2, w, h: 26, angle: 0 },
+    { cx: cx - w / 2, cy, w: 26, h, angle: 0 },
+  ].map((o) => ({ cx: Math.round(o.cx), cy: Math.round(o.cy), w: Math.round(o.w), h: Math.round(o.h), angle: 0 }));
+}
+function computeOverlap(shape) {
+  const spec = SHAPES[shape.type], c = shape.coords;
+  if (spec.drawKind === 'circle') {
+    return Math.hypot((c.cx || 0) - MASK.cx, (c.cy || 0) - MASK.cy) < MASK.r + (c.r || 0);
+  }
+  if (spec.drawKind === 'line') {
+    // distance from mask centre to the segment
+    const ax = c.sx || 0, ay = c.sy || 0, bx = c.ex || 0, by = c.ey || 0;
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1;
+    let t = ((MASK.cx - ax) * dx + (MASK.cy - ay) * dy) / len2; t = Math.max(0, Math.min(1, t));
+    const px = ax + t * dx, py = ay + t * dy;
+    return Math.hypot(px - MASK.cx, py - MASK.cy) < MASK.r + 6;
+  }
+  // box
+  const halfDiag = Math.hypot((c.w || 0) / 2, (c.h || 0) / 2);
+  return Math.hypot((c.cx || 0) - MASK.cx, (c.cy || 0) - MASK.cy) < MASK.r + halfDiag;
+}
+
+/* ================= CANVAS OVERLAY ================= */
+function boxCorners(cx, cy, w, h, angleDeg) {
+  const a = (angleDeg || 0) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const c = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  return [c(-w / 2, -h / 2), c(w / 2, -h / 2), c(w / 2, h / 2), c(-w / 2, h / 2)];
+}
+function Chevron({ p0, p1, color }) {
+  // ">" placed at midpoint of edge p0->p1, pointing along it
+  const mx = (p0[0] + p1[0]) / 2, my = (p0[1] + p1[1]) / 2;
+  const ang = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]);
+  const s = 7;
+  const tip = [mx + s * Math.cos(ang), my + s * Math.sin(ang)];
+  const a = [mx - s * Math.cos(ang - 0.6), my - s * Math.sin(ang - 0.6)];
+  const b = [mx - s * Math.cos(ang + 0.6), my - s * Math.sin(ang + 0.6)];
+  return <polyline points={`${a[0]},${a[1]} ${tip[0]},${tip[1]} ${b[0]},${b[1]}`} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />;
+}
+function ShapeOverlay({ shape, draft, drawKind }) {
+  const BLUE = '#2f6fed', GREEN = '#56b733', RED = '#e0473a', PURPLE = '#7c3aed', ORANGE = '#e8542b';
+  const dot = (x, y, c, k) => <circle key={k} cx={x} cy={y} r="2.4" fill={c} stroke="#fff" strokeWidth=".6" />;
+
+  // live draft while sketching
+  if (draft) {
+    if (drawKind === 'circle') {
+      const r = Math.hypot(draft.x1 - draft.x0, draft.y1 - draft.y0);
+      return <g><circle cx={draft.x0} cy={draft.y0} r={r} fill="#e8542b18" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" /><circle cx={draft.x0} cy={draft.y0} r="2.5" fill={ORANGE} /></g>;
+    }
+    if (drawKind === 'line') return <line x1={draft.x0} y1={draft.y0} x2={draft.x1} y2={draft.y1} stroke={ORANGE} strokeWidth="2" strokeDasharray="4 3" />;
+    const x = Math.min(draft.x0, draft.x1), y = Math.min(draft.y0, draft.y1);
+    return <rect x={x} y={y} width={Math.abs(draft.x1 - draft.x0)} height={Math.abs(draft.y1 - draft.y0)} fill="#e8542b18" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />;
+  }
+  if (!shape || !shape.drawn) return null;
+  const spec = SHAPES[shape.type], c = shape.coords, gen = shape.generated;
+
+  /* ---- Circle / Sector ---- */
+  if (shape.type === 'circle') {
+    const cx = c.cx ?? 250, cy = c.cy ?? 190, r = c.r ?? 90;
+    const sector = shape.caliperType === 'Sector Caliper';
+    const a0 = sector ? -0.5 : 0, a1 = sector ? 2.6 : Math.PI * 2;
+    const n = Math.min(shape.caliper.number || 12, 40), cal = [], dots = [];
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (a1 - a0) * (i / (sector ? n - 1 : n)); const ir = r - 15, or_ = r + 15;
+      cal.push(<line key={'c' + i} x1={cx + ir * Math.cos(a)} y1={cy + ir * Math.sin(a)} x2={cx + or_ * Math.cos(a)} y2={cy + or_ * Math.sin(a)} stroke={BLUE} strokeWidth="1.4" opacity=".8" />);
+      if (gen) { const er = r + wob(i, 4); dots.push(dot(cx + er * Math.cos(a), cy + er * Math.sin(a), GREEN, 'd' + i)); }
+    }
+    return (
+      <g>
+        {sector
+          ? <path d={`M ${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)} A ${r} ${r} 0 1 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`} fill="none" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
+          : <circle cx={cx} cy={cy} r={r} fill="none" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />}
+        {cal}{dots}
+        {gen && <circle cx={cx} cy={cy} r={r} fill="none" stroke={GREEN} strokeWidth="2" />}
+        <circle cx={cx} cy={cy} r="2.5" fill={ORANGE} />
+        <text x={cx} y={cy - r - 20} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || 'Circle'} · {shape.caliperType}</text>
+      </g>
+    );
+  }
+  /* ---- Line ---- */
+  if (shape.type === 'line') {
+    const x1 = c.sx ?? 150, y1 = c.sy ?? 120, x2 = c.ex ?? 360, y2 = c.ey ?? 250;
+    const n = Math.min(shape.caliper.number || 12, 30);
+    const ang = Math.atan2(y2 - y1, x2 - x1), nx = -Math.sin(ang), ny = Math.cos(ang);
+    const h = (shape.caliper.height || 40) * 0.4, cal = [], dots = [];
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1), px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
+      cal.push(<line key={'l' + i} x1={px - nx * h} y1={py - ny * h} x2={px + nx * h} y2={py + ny * h} stroke={BLUE} strokeWidth="1.3" opacity=".75" />);
+      if (gen) { const off = wob(i, 6); dots.push(dot(px + nx * off, py + ny * off, GREEN, 'ld' + i)); }
+    }
+    return (
+      <g>
+        {cal}
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={ORANGE} strokeWidth="1.4" strokeDasharray="4 3" />
+        {dots}
+        {gen && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={GREEN} strokeWidth="2" />}
+        <Chevron p0={[x1, y1]} p1={[x2, y2]} color={PURPLE} />
+        <text x={(x1 + x2) / 2} y={Math.min(y1, y2) - 14} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || 'Line'}</text>
+      </g>
+    );
+  }
+  /* ---- Quadrilateral (4 boxes) ---- */
+  if (shape.type === 'quad') {
+    const units = shape.units || [];
+    return (
+      <g>
+        {units.map((u, i) => {
+          const cc = u.coords, cor = boxCorners(cc.cx, cc.cy, cc.w, cc.h, cc.angle);
+          const sel = shape.selUnit === i;
+          return (
+            <g key={i}>
+              <polygon points={cor.map((p) => p.join(',')).join(' ')} fill={sel ? '#e8542b18' : '#2f6fed10'} stroke={sel ? ORANGE : RED} strokeWidth={sel ? '2' : '1.4'} strokeDasharray="4 2" />
+              <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
+              <text x={cc.cx} y={cc.cy + 3} fill={sel ? ORANGE : RED} fontSize="9" fontWeight="700" textAnchor="middle">B{i + 1}</text>
+              {gen && cor.map((p, k) => dot(p[0], p[1], GREEN, 'q' + i + k))}
+            </g>
+          );
+        })}
+        {gen && (() => {
+          const oc = boxCorners(c.cx, c.cy, c.w, c.h, c.angle);
+          return <polygon points={oc.map((p) => p.join(',')).join(' ')} fill="none" stroke={GREEN} strokeWidth="2" />;
+        })()}
+        <text x={c.cx} y={c.cy - (c.h || 120) / 2 - 24} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || 'Quadrilateral'}</text>
+      </g>
+    );
+  }
+  /* ---- Box shapes: ellipse / parallel / edge / peak ---- */
+  const cx = c.cx ?? 250, cy = c.cy ?? 190, w = c.w ?? 190, h = c.h ?? 120, ang = c.angle || 0;
+  const cor = boxCorners(cx, cy, w, h, ang);
+  const rad = ang * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
+  const local = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  let inner = null;
+  if (gen && shape.type === 'ellipse') {
+    inner = <g>
+      <ellipse cx={cx} cy={cy} rx={w / 2} ry={h / 2} fill="none" stroke={GREEN} strokeWidth="2" transform={`rotate(${ang} ${cx} ${cy})`} />
+      <ellipse cx={cx} cy={cy} rx={(w / 2) * (shape.boundary.smallAxis || .4)} ry={(h / 2) * (shape.boundary.smallAxis || .4)} fill="none" stroke={BLUE} strokeWidth="1" strokeDasharray="3 2" opacity=".7" transform={`rotate(${ang} ${cx} ${cy})`} />
+      {Array.from({ length: Math.min(shape.caliper.number || 12, 26) }).map((_, i) => {
+        const t = (i / (shape.caliper.number || 12)) * Math.PI * 2;
+        return dot(cx + (w / 2) * Math.cos(t) * cos - (h / 2) * Math.sin(t) * sin, cy + (w / 2) * Math.cos(t) * sin + (h / 2) * Math.sin(t) * cos, GREEN, 'e' + i);
+      })}
+    </g>;
+  } else if (gen && shape.type === 'parallel') {
+    const off = h / 3.2;
+    inner = <g>
+      <line {...seg(local(-w / 2, -off), local(w / 2, -off))} stroke={GREEN} strokeWidth="2" />
+      <line {...seg(local(-w / 2, off), local(w / 2, off))} stroke={GREEN} strokeWidth="2" />
+      {[-off, off].map((o, k) => Array.from({ length: 7 }).map((_, i) => { const p = local(-w / 2 + w * (i / 6), o + wob(i + k, 4)); return dot(p[0], p[1], k ? BLUE : GREEN, 'p' + k + i); }))}
+    </g>;
+  } else if (gen && shape.type === 'edge') {
+    inner = <g>{[-30, 0, 34].map((o, k) => <line key={k} {...seg(local(-w / 2, o), local(w / 2, o))} stroke={[GREEN, BLUE, PURPLE][k]} strokeWidth="1.8" opacity=".9" />)}</g>;
+  } else if (gen && shape.type === 'peak') {
+    const pts = Array.from({ length: 9 }).map((_, i) => local(wob(i, w * .38), wob(i + 3, h * .32)));
+    inner = <g>{pts.map((p, i) => dot(p[0], p[1], '#9aa4b2', 'pk' + i))}<circle cx={pts[3][0]} cy={pts[3][1]} r="5" fill="none" stroke={ORANGE} strokeWidth="2" /><circle cx={pts[3][0]} cy={pts[3][1]} r="2.6" fill={ORANGE} /></g>;
+  }
+  return (
+    <g>
+      <polygon points={cor.map((p) => p.join(',')).join(' ')} fill="#2f6fed0f" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
+      <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
+      {inner}
+      <text x={cx} y={cy + h / 2 + 26} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || spec.label} · Box Caliper</text>
+    </g>
+  );
+}
+function seg(a, b) { return { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }; }
+
+function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
+  const svgRef = useRef(null);
+  const [draft, setDraft] = useState(null);
+  const rotRef = useRef(false);
+  const drawKind = activeShape && activeShape.type ? SHAPES[activeShape.type].drawKind : null;
+
+  const toSvg = (e) => {
+    const r = svgRef.current.getBoundingClientRect();
+    return [(e.clientX - r.left) * (500 / r.width), (e.clientY - r.top) * (380 / r.height)];
+  };
+  const down = (e) => {
+    if (!arming || !drawKind || drawKind === 'quad') return;
+    const [x, y] = toSvg(e); setDraft({ x0: x, y0: y, x1: x, y1: y });
+  };
+  const move = (e) => {
+    if (draft) { const [x, y] = toSvg(e); setDraft((d) => ({ ...d, x1: x, y1: y })); return; }
+    if (rotRef.current && activeShape) {
+      const [x, y] = toSvg(e); const c = activeShape.coords;
+      const base = Math.atan2(-(c.h || 120) / 2, (c.w || 190) / 2);
+      const deg = Math.round((Math.atan2(y - c.cy, x - c.cx) - base) * 180 / Math.PI);
+      onRotate(((deg % 360) + 360) % 360);
+    }
+  };
+  const up = () => {
+    if (draft) { onDrawn(geoFromDraft(draft)); setDraft(null); }
+    rotRef.current = false;
+  };
+  const geoFromDraft = (d) => ({ x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1 });
+
+  // rotate handle position for box shapes (after drawn, not arming)
+  let handle = null;
+  if (activeShape && activeShape.drawn && !arming && activeShape.type &&
+      ['ellipse', 'parallel', 'edge', 'peak'].includes(activeShape.type)) {
+    const c = activeShape.coords; const cor = boxCorners(c.cx ?? 250, c.cy ?? 190, c.w ?? 190, c.h ?? 120, c.angle || 0);
+    handle = cor[1];
+  }
+
+  return (
+    <div className="canvas-wrap">
+      <div className="frame">
+        <span className="flabel">INPUT IMAGE</span>
+        <svg ref={svgRef} width="500" height="380" viewBox="0 0 500 380"
+          style={{ cursor: arming ? 'crosshair' : 'default', touchAction: 'none' }}
+          onMouseDown={down} onMouseMove={move} onMouseUp={up} onMouseLeave={up}>
+          <defs>
+            <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3a4149" /><stop offset=".5" stopColor="#2a3038" /><stop offset="1" stopColor="#1c2127" /></linearGradient>
+            <radialGradient id="sheen" cx=".4" cy=".3" r=".9"><stop offset="0" stopColor="#5a6472" stopOpacity=".5" /><stop offset="1" stopColor="#000" stopOpacity="0" /></radialGradient>
+          </defs>
+          <rect width="500" height="380" fill="url(#metal)" />
+          <rect width="500" height="380" fill="url(#sheen)" />
+          <rect x="120" y="70" width="260" height="240" rx="14" fill="#464e57" stroke="#20262c" strokeWidth="2" />
+          <rect x="120" y="70" width="260" height="240" rx="14" fill="url(#sheen)" opacity=".5" />
+          <circle cx="250" cy="190" r="70" fill="#363d45" stroke="#12161a" strokeWidth="2" />
+          <circle cx="250" cy="190" r="46" fill="#2b3138" stroke="#12161a" strokeWidth="1.5" />
+          {[[150,100],[350,100],[150,280],[350,280]].map((p,i)=>(<circle key={i} cx={p[0]} cy={p[1]} r="9" fill="#22282e" stroke="#0d1114" strokeWidth="1.5" />))}
+          {segMode && (<g><circle cx={MASK.cx} cy={MASK.cy} r={MASK.r} fill="#7c3aed" opacity=".26" /><text x={MASK.cx} y="300" fill="#c9b3ff" fontSize="10" textAnchor="middle" fontWeight="700">SEGMENTATION MASK (ROI)</text></g>)}
+          <ShapeOverlay shape={activeShape} draft={draft} drawKind={drawKind} />
+          {handle && !draft && (
+            <g onMouseDown={(e) => { e.stopPropagation(); rotRef.current = true; }} style={{ cursor: 'grab' }}>
+              <line x1={activeShape.coords.cx} y1={activeShape.coords.cy} x2={handle[0]} y2={handle[1]} stroke="#e8542b" strokeWidth="1" opacity=".5" />
+              <circle cx={handle[0]} cy={handle[1]} r="6" fill="#fff" stroke="#e8542b" strokeWidth="2" />
+              <circle cx={handle[0]} cy={handle[1]} r="1.8" fill="#e8542b" />
+            </g>
+          )}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* ================= FIELDS ================= */
+function NumberField({ label, sub, value, onChange, min, max, unit, step }) {
+  return (
+    <div>
+      <span className="tinylab">{label}{unit ? ` (${unit})` : ''}</span>
+      <input className="inp" type="number" value={value} min={min} max={max} step={step || 1}
+        onChange={(e) => onChange(e.target.value === '' ? '' : Number(e.target.value))} />
+      {sub && <div className="hint" style={{ marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+}
+function BoundaryEditor({ spec, boundary, patch }) {
+  return (
+    <div>
+      {spec.boundary.types && (
+        <div className="field">
+          <span className="tinylab">Boundary Type</span>
+          <select className="sel" value={boundary.type} onChange={(e) => patch({ type: e.target.value })}>
+            {spec.boundary.types.map((t) => <option key={t}>{t}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="row2 field">
+        {spec.boundary.polarity && (
+          <div>
+            <span className="tinylab">Boundary Polarity</span>
+            <select className="sel" value={boundary.polarity} onChange={(e) => patch({ polarity: e.target.value })}>
+              {POLARITIES.map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+        )}
+        {spec.boundary.threshold && (
+          <NumberField label="Boundary Intensity Threshold" value={boundary.threshold} min={0} max={255} onChange={(v) => patch({ threshold: v })} />
+        )}
+      </div>
+      {spec.boundary.window && (
+        <div className="field"><NumberField label="Observing Window" value={boundary.window} min={1} max={50} onChange={(v) => patch({ window: v })} /></div>
+      )}
+      {spec.extras.map(([k, lab, sub]) => (
+        <div className="field" key={k}>
+          <NumberField label={lab} sub={sub} value={boundary[k]}
+            step={k === 'smallAxis' || k === 'largeAxis' ? 0.05 : 1} min={0}
+            max={k === 'smallAxis' || k === 'largeAxis' ? 1 : 360} onChange={(v) => patch({ [k]: v })} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ================= SHAPE CARD ================= */
+function ConfirmModal({ open, onKeep, onDiscard }) {
+  if (!open) return null;
+  return (
+    <div className="overlay" onClick={onKeep}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="mh">⚠ Changes will be lost</div>
+        <div className="mb">Changing this will discard the shape, calipers and parameters you've configured for it. Do you want to continue?</div>
+        <div className="mf">
+          <button className="btn btn-ghost" onClick={onKeep}>Keep editing</button>
+          <button className="btn btn-primary" onClick={onDiscard}>Discard &amp; change</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function TrashIcon() {
+  return (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></svg>);
+}
+
+function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr, nameOptions, otherNames, onArmDraw, arming }) {
+  const [confirm, setConfirm] = useState(null);
+  const set = (patch) => onChange({ ...shape, ...patch });
+  const hasWork = shape.drawn || shape.generated;
+  const guard = (applyFn) => { if (hasWork) setConfirm(() => applyFn); else applyFn(); };
+
+  if (!shape.type) {
+    return (
+      <div className={'shapecard' + (selected ? ' sel' : '')}>
+        <div className="sc-hdr" onClick={onSelect}>
+          <div className="t"><span className="chip num">{idx + 1}</span>Select a shape</div>
+          <div className="tools"><span className="del" title="Delete shape" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TrashIcon /></span></div>
+        </div>
+        {selected && (
+          <div className="sc-body">
+            <div className="field">
+              <span className="lbl">Shape</span>
+              <select className="sel" value="" onChange={(e) => { const t = e.target.value; onChange({ ...makeShape(t), id: shape.id, name: nameOptions(t)[0] || '' }); }}>
+                <option value="">Select shape…</option>
+                {SHAPE_ORDER.map((k) => <option key={k} value={k}>{SHAPES[k].label}</option>)}
+              </select>
+              <div className="hint">Pick a shape to configure its name, mode, calipers, coordinates and boundary parameters.</div>
+              {showErr && <div className="err">⚠ Select a shape to configure.</div>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const spec = SHAPES[shape.type];
+  const coordDefs = spec.coordsByCaliper ? spec.coordsByCaliper[shape.caliperType] : spec.coords;
+  const perUnit = spec.perUnit;
+  const curUnit = perUnit ? shape.units[shape.selUnit] : null;
+  const segNoMask = shape.mode === 'segmentation' && !shape.classMask;
+  const overlapErr = shape.mode === 'segmentation' && shape.drawn && shape.offMask;
+  const nameSuffix = shape.name && shape.name.startsWith(spec.prefix + '_') ? shape.name.slice(spec.prefix.length + 1) : (shape.name || '');
+  const dupName = !!shape.name && (otherNames || []).includes(shape.name);
+  const drawEnclosure = spec.drawKind === 'circle' ? 'Circle' : spec.drawKind === 'line' ? 'Line' : 'Box';
+
+  const changeType = (t) => guard(() => onChange({ ...makeShape(t), id: shape.id, mode: shape.mode, classMask: shape.classMask, name: nameOptions(t)[0] || '' }));
+  const changeMode = (m) => guard(() => set({ mode: m, drawn: false, generated: false, offMask: false, coords: {} }));
+  const changeCaliperType = (ct) => guard(() => set({ caliperType: ct, drawn: false, generated: false, coords: {} }));
+
+  const unitPatch = (field, patch) => {
+    const units = shape.units.map((u, i) => i === shape.selUnit ? { ...u, [field]: { ...u[field], ...patch } } : u);
+    set({ units });
+  };
+  const setCoord = (k, v) => {
+    if (perUnit && perUnit.perCoords) {
+      const units = shape.units.map((u, i) => i === shape.selUnit ? { ...u, coords: { ...u.coords, [k]: Number(v) } } : u);
+      set({ units, generated: false });
+    } else set({ coords: { ...shape.coords, [k]: Number(v) }, generated: false });
+  };
+  const shownCoords = perUnit && perUnit.perCoords ? curUnit.coords : shape.coords;
+
+  return (
+    <div className={'shapecard' + (selected ? ' sel' : '')}>
+      <ConfirmModal open={!!confirm} onKeep={() => setConfirm(null)} onDiscard={() => { confirm(); setConfirm(null); }} />
+      <div className="sc-hdr" onClick={onSelect}>
+        <div className="t"><span className="chip num">{idx + 1}</span>{shape.name || spec.label}</div>
+        <div className="tools"><span className="del" title="Delete shape" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TrashIcon /></span></div>
+      </div>
+      {selected && (
+        <div className="sc-body">
+          {/* Shape type */}
+          <div className="field">
+            <span className="lbl">Shape</span>
+            <select className="sel" value={shape.type} onChange={(e) => changeType(e.target.value)}>
+              <option value="">Select shape…</option>
+              {SHAPE_ORDER.map((k) => <option key={k} value={k}>{SHAPES[k].label}</option>)}
+            </select>
+          </div>
+
+          {/* Shape name — editable text field, prefixed with the shape type */}
+          <div className="field">
+            <span className="lbl">Shape Name</span>
+            <div className={'namewrap' + (dupName ? ' dup' : '')}>
+              <span className="nameprefix">{spec.prefix}_</span>
+              <input className="nameinput" type="text" value={nameSuffix} placeholder="1"
+                onChange={(e) => set({ name: spec.prefix + '_' + e.target.value.replace(/\s+/g, '') })} />
+            </div>
+            {dupName
+              ? <div className="err">⚠ A shape named “{shape.name}” already exists in this capture. Names must be unique.</div>
+              : <div className="hint">Editable · prefixed with the shape type · unique within the capture.</div>}
+          </div>
+
+          {/* Mode */}
+          <div className="field">
+            <span className="lbl">Mode <span className="sub">· ROI the calipers search within</span></span>
+            <div className="modetoggle">
+              <button className={shape.mode === 'direct' ? 'on' : ''} onClick={() => changeMode('direct')}>Direct (Image / SA)</button>
+              <button className={shape.mode === 'segmentation' ? 'on' : ''} onClick={() => changeMode('segmentation')}>Segmentation Class</button>
+            </div>
+          </div>
+
+          {shape.mode === 'segmentation' && (
+            <div className="field">
+              <span className="lbl">Segmentation Class Mask</span>
+              <select className="sel" value={shape.classMask} onChange={(e) => set({ classMask: e.target.value })}>
+                <option value="">Select class mask…</option>
+                {CLASS_MASKS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              {showErr && segNoMask && <div className="err">⚠ Select a class mask for segmentation mode.</div>}
+            </div>
+          )}
+
+          {/* Caliper Type (circle) + Draw on the same row; else Draw full width */}
+          <div className="field">
+            {spec.hasCaliperType ? (
+              <div className="rowcta">
+                <div>
+                  <span className="tinylab">Caliper Type</span>
+                  <select className="sel" value={shape.caliperType} onChange={(e) => changeCaliperType(e.target.value)}>
+                    {spec.caliperTypes.map((t) => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
+                <button className={'drawbtn ' + (arming ? 'armed' : shape.drawn ? 'done' : '')} onClick={onArmDraw}>
+                  {arming ? '◉ Sketching…' : shape.drawn ? '↻ Redraw' : '✎ Draw ' + drawEnclosure}
+                </button>
+              </div>
+            ) : (
+              <button className={'drawbtn ' + (arming ? 'armed' : shape.drawn ? 'done' : '')} onClick={onArmDraw}>
+                {arming ? '◉ Sketching on canvas…' : shape.drawn ? '↻ Redraw ' + drawEnclosure + ' on canvas' : '✎ Draw ' + drawEnclosure + (spec.drawKind === 'quad' ? ' (Quadra Box)' : '') + ' on canvas'}
+              </button>
+            )}
+            {arming && <div className="hint">{spec.drawKind === 'circle' ? 'Drag from centre outward to set the radius.' : spec.drawKind === 'line' ? 'Drag from start to end point.' : 'Drag to draw the box enclosure.'}</div>}
+            {shape.drawn && shape.mode === 'segmentation' && !shape.offMask && <div className="okline">✓ Calipers overlap the segmentation mask</div>}
+            {overlapErr && <div className="err">⚠ Drawn ROI has no overlap with the segmentation mask. Reposition / redraw the shape.</div>}
+            {showErr && !shape.drawn && <div className="err">⚠ Draw the {drawEnclosure.toLowerCase()} enclosure before proceeding.</div>}
+          </div>
+
+          {/* Coordinates */}
+          {shape.drawn && (
+            <div className="field">
+              <div className="block-t">{spec.coordTitle}{perUnit && perUnit.perCoords ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+              {perUnit && perUnit.perCoords && (
+                <div className="boxtabs">
+                  {shape.units.map((_, i) => <button key={i} className={shape.selUnit === i ? 'on' : ''} onClick={() => set({ selUnit: i })}>{perUnit.label} {i + 1}</button>)}
+                </div>
+              )}
+              <div className="row3">
+                {(perUnit && perUnit.perCoords ? spec.coords : coordDefs).map(([k, lab]) => (
+                  <div key={k}>
+                    <span className="tinylab">{lab}</span>
+                    <input className="inp" type="number" value={shownCoords[k] ?? 0} onChange={(e) => setCoord(k, e.target.value)} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Caliper Parameters */}
+          {shape.drawn && (spec.caliperParams.length > 0 ? (
+            <div className="field">
+              <div className="block-t">Caliper Parameters{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+              <div className="row2">
+                {spec.caliperParams.map((k) => {
+                  const meta = CALIPER_PARAM_META[k];
+                  const usePer = perUnit && perUnit.perCaliper;
+                  const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
+                  const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
+                  return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
+                })}
+              </div>
+              {spec.caliperNote && <div className="hint">{spec.caliperNote}</div>}
+            </div>
+          ) : (
+            <div className="field"><span className="miniauto">No caliper-count parameter for {spec.label} — calipers are auto-generated.</span></div>
+          ))}
+
+          {/* Boundary Parameters */}
+          {shape.drawn && (
+            <div className="field">
+              <div className="block-t">Boundary Parameters{perUnit ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
+              {perUnit && !perUnit.perCoords && (
+                <div className="boxtabs">
+                  {shape.units.map((_, i) => <button key={i} className={shape.selUnit === i ? 'on' : ''} onClick={() => set({ selUnit: i })}>{perUnit.label} {i + 1}</button>)}
+                </div>
+              )}
+              <BoundaryEditor spec={spec}
+                boundary={perUnit ? curUnit.boundary : shape.boundary}
+                patch={(p) => perUnit ? unitPatch('boundary', p) : set({ boundary: { ...shape.boundary, ...p } })} />
+            </div>
+          )}
+
+          {/* General params (e.g. Max Angle Difference) — outside per-unit editors */}
+          {shape.drawn && spec.general.length > 0 && (
+            <div className="field">
+              <div className="block-t">General <span className="ln" /></div>
+              {spec.general.map(([k, lab, sub]) => (
+                <NumberField key={k} label={lab} sub={sub} value={shape.general[k]} min={0} max={180}
+                  onChange={(v) => set({ general: { ...shape.general, [k]: v } })} />
+              ))}
+            </div>
+          )}
+
+          {/* Generate Shape */}
+          {shape.drawn && (
+            <button className={'genbtn' + (shape.generated ? ' re' : '') + (overlapErr ? ' dis' : '')}
+              disabled={overlapErr}
+              onClick={() => { if (!overlapErr) set({ generated: true }); }}>
+              {shape.generated ? '↻ Regenerate shape trace' : '✦ Generate Shape'}
+            </button>
+          )}
+          {shape.generated && <div className="okline" style={{ justifyContent: 'center', marginTop: 8 }}>✓ Shape trace generated on canvas</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= VISION ================= */
+const STEPS = ['Module Inputs', 'Module Setup', 'Module Outputs'];
+
+function VisionConfig({ toast }) {
+  const [step, setStep] = useState(0);
+  const [baseSA, setBaseSA] = useState('sa1');
+  const [shapes, setShapes] = useState(() => [makeShape('')]);
+  const [sel, setSel] = useState(() => shapes[0].id);
+  const [showErr, setShowErr] = useState(false);
+  const [arming, setArming] = useState(null);
+
+  const activeShape = shapes.find((s) => s.id === sel) || shapes[0];
+  const segMode = activeShape && activeShape.mode === 'segmentation';
+
+  // name options for a given type: prefix + n, excluding names used by OTHER shapes
+  const nameOptions = useCallback((type) => {
+    const prefix = SHAPES[type]?.prefix || 'Shape';
+    const used = new Set(shapes.filter((s) => s.id !== sel && s.type === type).map((s) => s.name));
+    const out = [];
+    for (let i = 1; out.length < 8; i++) { const nm = `${prefix}_${i}`; if (!used.has(nm)) out.push(nm); }
+    return out;
+  }, [shapes, sel]);
+
+  const updateShape = (ns) => setShapes((prev) => prev.map((s) => s.id === ns.id ? ns : s));
+  const addShape = () => { const ns = makeShape(''); setShapes((p) => [...p, ns]); setSel(ns.id); setShowErr(false); setArming(null); };
+  const removeShape = (id) => setShapes((p) => {
+    const nx = p.filter((s) => s.id !== id);
+    if (id === sel && nx.length) setSel(nx[0].id);
+    return nx.length ? nx : [makeShape('')];
+  });
+
+  const armDraw = () => {
+    const spec = SHAPES[activeShape.type];
+    if (spec.drawKind === 'quad') {
+      // composite: place the 4-box template directly
+      const cx = 250, cy = 190, w = 190, h = 120;
+      const units = activeShape.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(cx, cy, w, h)[i] }));
+      const ns = { ...activeShape, drawn: true, generated: false, offMask: false, coords: { cx, cy, w, h, angle: 0 }, units };
+      updateShape({ ...ns, offMask: SHAPES[ns.type] && ns.mode === 'segmentation' ? !computeOverlap(ns) : false });
+      return;
+    }
+    setArming(activeShape.id);
+  };
+  const onDrawn = (geo) => {
+    const coords = geoToCoords(activeShape, geo);
+    let ns = { ...activeShape, drawn: true, generated: false, coords };
+    if (SHAPES[ns.type].perUnit && SHAPES[ns.type].perUnit.perCoords) {
+      ns.units = ns.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(coords.cx, coords.cy, coords.w, coords.h)[i] }));
+    }
+    ns.offMask = ns.mode === 'segmentation' ? !computeOverlap(ns) : false;
+    updateShape(ns); setArming(null);
+  };
+  const onRotate = (angle) => {
+    const ns = { ...activeShape, coords: { ...activeShape.coords, angle }, generated: false };
+    ns.offMask = ns.mode === 'segmentation' ? !computeOverlap(ns) : false;
+    updateShape(ns);
+  };
+
+  const typedShapes = shapes.filter((s) => s.type);
+  const namesList = typedShapes.map((s) => s.name);
+  const namesUnique = new Set(namesList).size === namesList.length && namesList.every(Boolean);
+  const setupValid = typedShapes.length > 0 && namesUnique && shapes.every((s) => {
+    if (!s.type || !s.drawn || !s.generated) return false;
+    if (s.mode === 'segmentation' && (!s.classMask || s.offMask)) return false;
+    return true;
+  });
+
+  const onNext = () => {
+    if (step === 0) { if (!baseSA) { setShowErr(true); return; } setShowErr(false); setStep(1); return; }
+    if (step === 1) {
+      if (!setupValid) { setShowErr(true); toast('Finish every shape: draw it, resolve errors, and Generate Shape.', true); return; }
+      setShowErr(false); setStep(2); return;
+    }
+    toast('Shape Extractor configured');
+  };
+  const onBack = () => { if (step === 0) { toast('Exited module configuration'); return; } setArming(null); setStep(step - 1); };
+
+  return (
+    <Fragment>
+      <div className="stage">
+        <div className="canvas-col">
+          <div className="canvas-tools">
+            <div className="ct">◳ Fit</div><div className="ct">⤢ Zoom</div>
+            <div className="ct" style={{ color: 'var(--orange)' }}>▧ {STEPS[step]}</div>
+          </div>
+          <Canvas activeShape={step >= 1 ? activeShape : null} segMode={step >= 1 && segMode}
+            arming={step === 1 && arming === (activeShape && activeShape.id)} onDrawn={onDrawn} onRotate={onRotate} />
+          {step === 1 && arming && <div className="drawhint arm">◉ {SHAPES[activeShape.type].drawKind === 'circle' ? 'Drag from centre to set radius' : SHAPES[activeShape.type].drawKind === 'line' ? 'Drag from start to end' : 'Drag to draw the box'}</div>}
+          {step === 1 && !arming && activeShape && !activeShape.type && <div className="drawhint">◆ Select a shape in the panel to begin</div>}
+          {step === 1 && !arming && activeShape && activeShape.type && !activeShape.drawn && <div className="drawhint">✎ Click <span className="k">Draw</span> in the panel, then sketch here</div>}
+        </div>
+
+        <div className="flow-col">
+          <div className="fnode master"><div className="ft">Master Image</div><div className="fs">1 capture</div></div>
+          <div className="fconn" />
+          <div className="fnode done"><span className="badge">✓</span><div className="ft">Segmentation</div><div className="fs">SEG_1</div></div>
+          <div className="fconn" />
+          <div className="fnode done"><span className="badge">✓</span><div className="ft">Search Area</div><div className="fs">SA_1</div></div>
+          <div className="fconn" />
+          <div className="fnode sel"><div className="ft">Shape Extractor</div><div className="fs">SHE_1</div></div>
+        </div>
+
+        <div className="pane">
+          <div className="pane-hdr"><div className="ic"><span className="sq" /><span>4. Shape Extractor</span></div><span className="x" title="Close">✕</span></div>
+          <div className="stepper">
+            {STEPS.map((s, i) => (<Fragment key={s}><span className={'st' + (i === step ? ' active' : '')}>{s}</span>{i < STEPS.length - 1 && <span className="sep">›</span>}</Fragment>))}
+          </div>
+
+          <div className="pane-body">
+            {step === 0 && (
+              <div className="sec">
+                <span className="lbl">Base Search Area</span>
+                <select className="sel" value={baseSA} onChange={(e) => setBaseSA(e.target.value)}>
+                  {SEARCH_AREAS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <div className="hint">The parent search area (or masking / orientator output) this module runs on. Selecting a segmentation class is optional and is chosen per-shape in Module Setup.</div>
+              </div>
+            )}
+
+            {step === 1 && (
+              <div>
+                <div style={{ padding: '12px 14px 2px' }}><button className="addbtn" onClick={addShape}>＋ Add Shape</button></div>
+                {shapes.map((s, i) => (
+                  <ShapeCard key={s.id} shape={s} idx={i} selected={s.id === sel}
+                    onSelect={() => { setSel(s.id); setArming(null); }} onChange={updateShape} onRemove={() => removeShape(s.id)}
+                    showErr={showErr && s.id === sel} nameOptions={nameOptions}
+                    otherNames={shapes.filter((o) => o.id !== s.id).map((o) => o.name).filter(Boolean)}
+                    onArmDraw={armDraw} arming={arming === s.id} />
+                ))}
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <div style={{ padding: '12px 14px 4px', fontSize: 12, color: 'var(--muted)' }}>
+                  Every extracted shape and its measurements are passed downstream (selected by default, non-editable).
+                </div>
+                {typedShapes.map((s, i) => {
+                  const spec = SHAPES[s.type];
+                  const errPct = (0.4 + wob(i + 2, 0.9) + 0.9).toFixed(1);
+                  return (
+                    <div className="outcard" key={s.id}>
+                      <div className="oh"><span className="chip num" style={{ width: 19, height: 19, borderRadius: '50%', background: 'var(--ink)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>{i + 1}</span>{s.name || spec.label}</div>
+                      <div className="ob">
+                        {spec.outputs.map((o) => (
+                          <label className="outrow" key={o}><input type="checkbox" checked disabled readOnly /><span className="on">{o}</span></label>
+                        ))}
+                        <label className="outrow errrow"><input type="checkbox" checked disabled readOnly /><span className="on">Error %</span><span className="emv">≈ {errPct}%</span></label>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="pane-foot">
+            <button className="btn btn-ghost" onClick={onBack}>{step === 0 ? 'Exit' : 'Back'}</button>
+            <button className="btn btn-primary" onClick={onNext} disabled={step === 0 && !baseSA}>{step === STEPS.length - 1 ? 'Finish' : 'Next'}</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="appbar">
+        <span className="pill">1 of 4 · Inspection Workflow</span>
+        <div className="steps">{STEPS.map((s, i) => <span key={s} className={'s' + (i === step ? ' cur' : '')}>{s}</span>)}</div>
+        <span style={{ marginLeft: 'auto', color: 'var(--muted)' }}>{shapes.filter((s) => s.generated).length} shape{shapes.filter((s) => s.generated).length === 1 ? '' : 's'} configured</span>
+      </div>
+    </Fragment>
+  );
+}
+
+/* ================= EDGE stub ================= */
+function EdgeConfig() {
+  return (
+    <div className="edge-stub">
+      <span className="tag">Frinks Edge · Edit Module Configurations</span>
+      <div className="big">Coming next</div>
+      <ul>
+        <li>🔧 <b>Editable Shape Extractor parameters</b> — the subset of caliper / boundary values that can be altered post-deployment.</li>
+        <li>📐 <b>Dimensioning</b> — author which distances / angles are computed <b>between which shapes</b> (shape-A feature ↔ shape-B feature).</li>
+      </ul>
+      <div style={{ fontSize: 12 }}>Dimensioning lives here on Edge, not in Vision. Use the switch at the top to return to the Vision module configuration.</div>
+    </div>
+  );
+}
+
+/* ================= APP ================= */
+function App() {
+  const [view, setView] = useState('vision');
+  const [toast, setToast] = useState(null);
+  const showToast = (msg, warn) => { setToast({ msg, warn }); setTimeout(() => setToast(null), 2400); };
+  return (
+    <div className="app">
+      <div className="topbar">
+        <div className="brand">
+          <span className="dot">F</span><span>Shape Extractor</span>
+          <span className="crumbs">&nbsp;·&nbsp; Recipe Management ▸ Variant A ▸ Cam 1 ▸ <b>Module Configuration</b></span>
+        </div>
+        <div className="switch">
+          <button className={view === 'vision' ? 'on' : ''} onClick={() => setView('vision')}><span className="pv">VISION</span> Module Configuration</button>
+          <button className={view === 'edge' ? 'on' : ''} onClick={() => setView('edge')}><span className="pv edge">EDGE</span> Edit Module Configurations</button>
+        </div>
+      </div>
+      {view === 'vision' ? <VisionConfig toast={showToast} /> : <EdgeConfig />}
+      {toast && <div className={'toast' + (toast.warn ? ' warn' : '')}>{toast.warn ? '⚠' : '✓'} {toast.msg}</div>}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+<script>
+  const src = document.querySelector('script[type="text/jsx-source"]').textContent;
+  const out = Babel.transform(src, { presets: [["react", { runtime: "classic" }]] }).code;
+  new Function(out)();
+</script>
+</body>
+</html>
