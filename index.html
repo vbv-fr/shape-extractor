@@ -1043,7 +1043,35 @@ function VisionConfig({ toast }) {
 
 /* ================= EDGE · EDIT MODULE CONFIGURATIONS ================= */
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const DIM_TYPES = ['Angle', 'Distance', 'Area', 'Length', 'Convexity', 'ContourContinuity'];
+const DIM_TYPE_OPTS = [
+  { v: 1, n: 'Angle' }, { v: 2, n: 'Distance' }, { v: 3, n: 'Area' },
+  { v: 4, n: 'Length' }, { v: 5, n: 'Convexity' }, { v: 6, n: 'ContourContinuity' },
+];
+const DIST_AXIS_OPTS = ['x', 'y', 'euclidean'];
+const EUC_MODE_OPTS = ['centre-to-centre', 'edge-to-edge', 'nearest'];
+const UNIT_OPTS = ['mm', 'mm²', '°', 'px'];
+// geometric features a shape exposes as a dimensioning endpoint
+const SHAPE_FEATURES = {
+  circle: ['Centre', 'Edge point', 'Radius'],
+  line: ['Start', 'End', 'Middle', 'Whole line'],
+  ellipse: ['Centre', 'Major axis', 'Minor axis', 'Focus 1', 'Focus 2'],
+  quad: ['Corner', 'Edge', 'Centre', 'Diagonal'],
+  parallel: ['Line 1', 'Line 2', 'Mid line'],
+  edge: ['Detected line'],
+  peak: ['Peak point'],
+};
+const unitForType = (t) => (t === 1 ? '°' : t === 3 ? 'mm²' : 'mm');
+function makeDim(shapes, n) {
+  const s0 = shapes[0], s1 = shapes[1] || shapes[0];
+  const feat = (s) => (s ? (SHAPE_FEATURES[s.type] || [''])[0] : '');
+  return {
+    id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
+    type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre', piecewise: false,
+    shapeOneId: s0 ? s0.id : '', shapeOneSelector: feat(s0),
+    shapeTwoId: s1 ? s1.id : '', shapeTwoSelector: feat(s1),
+    operator: 1, targetValue: 0, tolerance: 0, unit: 'mm', ratio: 0.05,
+  };
+}
 
 function seedEdgeShapes() {
   const mk = (type, name, coords, extra) => {
@@ -1056,19 +1084,8 @@ function seedEdgeShapes() {
     mk('ellipse', 'Ellipse_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 }, { mode: 'segmentation', classMask: 'm1' }),
   ];
 }
-function seedDims() {
-  return [
-    { id: 'd1', order: 1, type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre',
-      shapeOneName: 'Circle_1', shapeOneSelector: 'Centre', shapeOneEdgePoint: '',
-      shapeTwoName: 'Line_1', shapeTwoSelector: 'Middle', shapeTwoEdgePoint: '',
-      operator: 1, targetValue: 42, tolerance: 0.5, unit: 'mm', ratio: 0.05 },
-    { id: 'd2', order: 2, type: 1, shapeOneName: 'Line_1', shapeOneSelector: 'Angle',
-      shapeTwoName: 'Ellipse_1', shapeTwoSelector: 'Major axis',
-      operator: 1, targetValue: 90, tolerance: 1, unit: '°', ratio: 1 },
-    { id: 'd3', order: 3, type: 3, shapeOneName: 'Circle_1', shapeOneSelector: '',
-      operator: 2, targetValue: 24500, tolerance: 300, unit: 'mm²', ratio: 0.05 },
-  ];
-}
+// No dimensions are inherited from Vision — the operator authors them here.
+function seedDims() { return []; }
 
 // One read-only-identity, editable-params shape card (Edge side)
 function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
@@ -1092,7 +1109,6 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
     <div className={'shapecard' + (selected ? ' sel' : '')}>
       <div className="sc-hdr" onClick={onSelect}>
         <div className="t"><span className="chip num">{idx + 1}</span>{shape.name}</div>
-        <div className="lockrow">🔒 identity locked</div>
       </div>
       {selected && (
         <div className="sc-body">
@@ -1176,7 +1192,7 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
     <div className="emc-split">
       <div className="emc-config">
         <div style={{ padding: '12px 14px', fontSize: 12, color: 'var(--muted)' }}>
-          Shape identity (shape, name, mode, caliper type) is locked — authored in Vision. Tune coordinates, caliper &amp; boundary parameters here.
+          Shape, name, mode and caliper type were set in Vision and are shown for reference. Tune coordinates, caliper &amp; boundary parameters here.
         </div>
         {shapes.map((s, i) => (
           <EdgeShapeCard key={s.id} shape={s} idx={i} selected={s.id === sel} onSelect={() => setSel(s.id)} onChange={update} />
@@ -1193,61 +1209,118 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
   );
 }
 
-function EdgeDimensioning({ dims, setDims, onDirty }) {
-  const change = (i, k, v) => { setDims((p) => p.map((d, idx) => idx === i ? { ...d, [k]: v } : d)); onDirty(); };
+function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
+  const patch = (i, p) => { setDims((prev) => prev.map((d, idx) => idx === i ? { ...d, ...p } : d)); onDirty(); };
+  const shapeName = (id) => (shapes.find((s) => s.id === id) || {}).name || '';
+  const featOpts = (id) => { const s = shapes.find((x) => x.id === id); return s ? SHAPE_FEATURES[s.type] : []; };
   return (
     <div className="emc-dim">
       {dims.length === 0
-        ? <div className="banner warn">⚠ No dimensioning configured for this capture. A Shape Extractor capture with no dimensioning rules <b>cannot be deployed</b> — add at least one rule before deploying.</div>
-        : <div className="banner ok">✓ {dims.length} dimensioning rule{dims.length > 1 ? 's' : ''} set. Dimensions are computed between the Shape Extractor shapes of this capture. Rule structure is authored with the shapes; here you tune the ground-truth targets.</div>}
+        ? <div className="banner warn">⚠ No dimensioning configured for this capture. A Shape Extractor capture with no dimensioning <b>cannot be deployed</b> — add at least one dimension before deploying.</div>
+        : <div className="banner ok">✓ {dims.length} dimension{dims.length > 1 ? 's' : ''} created. Dimensions are computed between this capture's Shape Extractor shapes.</div>}
+
+      <button className="addbtn" style={{ marginBottom: 16 }} onClick={onAdd}>＋ Add Dimension</button>
+
       {dims.map((dim, index) => {
-        const single = [3, 5, 6].includes(dim.type);
+        const single = [3, 5, 6].includes(dim.type);   // Area / Convexity / ContourContinuity → one feature
         const noGT = [5, 6].includes(dim.type);
         return (
           <div className="dimcard" key={dim.id}>
-            <div className="dh"><span className="chip num">{dim.order || index + 1}</span>Dimensioning {dim.order || index + 1}</div>
-            <div className="row3" style={{ marginBottom: 12 }}>
-              <div><span className="tinylab">Type</span><input className="roinput" value={DIM_TYPES[dim.type - 1] || 'Unknown'} readOnly /></div>
-              {dim.type === 2 && <div><span className="tinylab">Distance Axis</span><input className="roinput" value={dim.distanceAxis || 'N/A'} readOnly /></div>}
-              {dim.type === 2 && dim.distanceAxis === 'euclidean' && <div><span className="tinylab">Euclidean Mode</span><input className="roinput" value={dim.euclideanMode || 'N/A'} readOnly /></div>}
-              {dim.type === 4 && <div><span className="tinylab">Piecewise</span><input className="roinput" value={dim.piecewise ? 'Yes' : 'No'} readOnly /></div>}
+            <div className="dh">
+              <span className="chip num">{index + 1}</span>
+              <span style={{ flex: 1 }}>{dim.name || `Dimension ${index + 1}`}</span>
+              <span className="del" title="Delete dimension" style={{ cursor: 'pointer' }} onClick={() => onRemove(dim.id)}><TrashIcon /></span>
             </div>
+
+            {/* Name */}
+            <div className="field">
+              <span className="tinylab">Dimension Name</span>
+              <input className="inp" type="text" value={dim.name} onChange={(e) => patch(index, { name: e.target.value })} />
+            </div>
+
+            {/* Type + type-dependent dropdowns */}
+            <div className="row3" style={{ marginBottom: 12 }}>
+              <div><span className="tinylab">Type</span>
+                <select className="sel" value={dim.type} onChange={(e) => { const t = Number(e.target.value); patch(index, { type: t, unit: unitForType(t) }); }}>
+                  {DIM_TYPE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
+                </select>
+              </div>
+              {dim.type === 2 && (
+                <div><span className="tinylab">Distance Axis</span>
+                  <select className="sel" value={dim.distanceAxis} onChange={(e) => patch(index, { distanceAxis: e.target.value })}>
+                    {DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </div>
+              )}
+              {dim.type === 2 && dim.distanceAxis === 'euclidean' && (
+                <div><span className="tinylab">Euclidean Mode</span>
+                  <select className="sel" value={dim.euclideanMode} onChange={(e) => patch(index, { euclideanMode: e.target.value })}>
+                    {EUC_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}
+                  </select>
+                </div>
+              )}
+              {dim.type === 4 && (
+                <div><span className="tinylab">Piecewise</span>
+                  <select className="sel" value={dim.piecewise ? 'Yes' : 'No'} onChange={(e) => patch(index, { piecewise: e.target.value === 'Yes' })}>
+                    <option>No</option><option>Yes</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Feature A */}
             <div className="field">
               <span className="tinylab">Feature A</span>
               <div className="feat">
-                <input className="roinput" value={dim.shapeOneName || 'Shape'} readOnly />
-                {!single && <input className="roinput" value={dim.shapeOneSelector || ''} readOnly />}
-                {dim.shapeOneEdgePoint && <input className="roinput" value={dim.shapeOneEdgePoint} readOnly />}
+                <select className="sel" value={dim.shapeOneId} onChange={(e) => patch(index, { shapeOneId: e.target.value, shapeOneSelector: (featOpts(e.target.value)[0] || '') })}>
+                  {shapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {!single && (
+                  <select className="sel" value={dim.shapeOneSelector} onChange={(e) => patch(index, { shapeOneSelector: e.target.value })}>
+                    {featOpts(dim.shapeOneId).map((f) => <option key={f}>{f}</option>)}
+                  </select>
+                )}
               </div>
             </div>
-            {dim.shapeTwoName && !single && (
+
+            {/* Feature B (two-feature types only) */}
+            {!single && (
               <div className="field">
                 <span className="tinylab">Feature B</span>
                 <div className="feat">
-                  <input className="roinput" value={dim.shapeTwoName} readOnly />
-                  <input className="roinput" value={dim.shapeTwoSelector || ''} readOnly />
-                  {dim.shapeTwoEdgePoint && <input className="roinput" value={dim.shapeTwoEdgePoint} readOnly />}
+                  <select className="sel" value={dim.shapeTwoId} onChange={(e) => patch(index, { shapeTwoId: e.target.value, shapeTwoSelector: (featOpts(e.target.value)[0] || '') })}>
+                    {shapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <select className="sel" value={dim.shapeTwoSelector} onChange={(e) => patch(index, { shapeTwoSelector: e.target.value })}>
+                    {featOpts(dim.shapeTwoId).map((f) => <option key={f}>{f}</option>)}
+                  </select>
                 </div>
               </div>
             )}
+
+            {/* Ground Truth (editable) */}
             {!noGT && (
               <>
                 <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
                 <div className="gtgrid">
                   <div><span className="tinylab">Operator</span>
-                    <select className="sel" value={dim.operator} onChange={(e) => change(index, 'operator', Number(e.target.value))}>
+                    <select className="sel" value={dim.operator} onChange={(e) => patch(index, { operator: Number(e.target.value) })}>
                       <option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option>
                     </select>
                   </div>
                   <div><span className="tinylab">Value</span>
-                    <input className="inp" type="number" min="0" value={dim.targetValue} onChange={(e) => change(index, 'targetValue', Math.max(0, Number(e.target.value)))} /></div>
+                    <input className="inp" type="number" min="0" value={dim.targetValue} onChange={(e) => patch(index, { targetValue: Math.max(0, Number(e.target.value)) })} /></div>
                   <div><span className="tinylab">Tolerance</span>
-                    <input className="inp" type="number" min="0" value={dim.tolerance} onChange={(e) => change(index, 'tolerance', Math.max(0, Number(e.target.value)))} /></div>
-                  <div><span className="tinylab">Unit</span><input className="roinput" value={dim.unit || ''} readOnly /></div>
+                    <input className="inp" type="number" min="0" value={dim.tolerance} onChange={(e) => patch(index, { tolerance: Math.max(0, Number(e.target.value)) })} /></div>
+                  <div><span className="tinylab">Unit</span>
+                    <select className="sel" value={dim.unit} onChange={(e) => patch(index, { unit: e.target.value })}>
+                      {UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div className="field" style={{ marginTop: 10 }}>
                   <span className="tinylab">Ratio (pixel to mm)</span>
-                  <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => change(index, 'ratio', Math.max(0, Number(e.target.value)))} />
+                  <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => patch(index, { ratio: Math.max(0, Number(e.target.value)) })} />
                 </div>
               </>
             )}
@@ -1286,6 +1359,8 @@ function EdgeEMC({ toast }) {
     setDims(clone(initial.current.dims));
     setDirty(false);
   };
+  const addDim = () => { setDims((p) => [...p, makeDim(shapes, p.length + 1)]); setDirty(true); };
+  const removeDim = (id) => { setDims((p) => p.filter((d) => d.id !== id)); setDirty(true); };
 
   return (
     <div className="emc">
@@ -1311,7 +1386,7 @@ function EdgeEMC({ toast }) {
       <div className="emc-body">
         {moduleSel === 'she1'
           ? <EdgeShapeEditor shapes={shapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={markDirty} />
-          : <EdgeDimensioning dims={dims} setDims={setDims} onDirty={markDirty} />}
+          : <EdgeDimensioning dims={dims} setDims={setDims} shapes={shapes} onDirty={markDirty} onAdd={addDim} onRemove={removeDim} />}
       </div>
 
       <div className="emc-foot">
