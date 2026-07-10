@@ -201,6 +201,17 @@ const { useState, useMemo, useCallback, useRef, useEffect, Fragment } = React;
 /* ================= SHAPE SPEC ================= */
 const BOUNDARY_TYPES = ['Strongest Edge', 'First Edge', 'Last Edge'];
 const POLARITIES = ['Both', 'Light to Dark', 'Dark to Light'];
+const SEARCH_DIRECTIONS = ['Towards the Centre', 'Away from Centre'];
+const MIN_AXIS_GAP = 0.1;
+// Large ellipse axis must sit at least MIN_AXIS_GAP outside the small one.
+const axisError = (spec, boundary) => {
+  if (!spec.extras.some(([k]) => k === 'largeAxis')) return null;
+  const small = Number(boundary.smallAxis), large = Number(boundary.largeAxis);
+  if (!Number.isFinite(small) || !Number.isFinite(large)) return null;
+  return large < small + MIN_AXIS_GAP
+    ? `Large ellipse axis must be at least ${MIN_AXIS_GAP} greater than the small ellipse axis (currently ${small} → needs ≥ ${(small + MIN_AXIS_GAP).toFixed(2)}).`
+    : null;
+};
 
 const SHAPES = {
   circle: {
@@ -211,7 +222,7 @@ const SHAPES = {
       'Circle Caliper': [['cx', 'Centre X'], ['cy', 'Centre Y'], ['r', 'Radius']],
       'Sector Caliper': [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['r', 'Radius']],
     },
-    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true },
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true, searchDirection: true },
     extras: [], general: [], perUnit: null,
     outputs: ['Centre', 'Radius', 'Perimeter', 'Area', 'Circularity', 'Convexity', 'Contour Continuity'],
   },
@@ -229,7 +240,7 @@ const SHAPES = {
     hasCaliperType: false, caliperViz: false,
     caliperParams: ['number'], caliperNote: 'Caliper width & height are auto-derived from the box dimensions.',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
-    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
+    boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false, searchDirection: true },
     extras: [['smallAxis', 'Small Ellipse Axis', '0–1 · ratio of small ellipse axis to box length'],
              ['largeAxis', 'Large Ellipse Axis', '0–1 · ratio of large ellipse axis to box length']],
     general: [], perUnit: null,
@@ -304,6 +315,7 @@ const wob = (i, amp) => (((i * 37 + 11) % 21) / 20 - 0.5) * 2 * amp;  // determi
 function defaultBoundary(spec) {
   const b = { polarity: 'Both', threshold: 128, window: 5 };
   if (spec.boundary.types) b.type = spec.boundary.types[0];
+  if (spec.boundary.searchDirection) b.searchDirection = SEARCH_DIRECTIONS[0];
   spec.extras.forEach(([k]) => { b[k] = k === 'smallAxis' ? 0.4 : k === 'largeAxis' ? 0.9 : k === 'maxResults' ? 8 : 0; });
   return b;
 }
@@ -626,6 +638,15 @@ function BoundaryEditor({ spec, boundary, patch }) {
       {spec.boundary.window && (
         <div className="field"><NumberField label="Observing Window" value={boundary.window} min={1} max={50} onChange={(v) => patch({ window: v })} /></div>
       )}
+      {spec.boundary.searchDirection && (
+        <div className="field">
+          <span className="tinylab">Search Direction</span>
+          <select className="sel" value={boundary.searchDirection} onChange={(e) => patch({ searchDirection: e.target.value })}>
+            {SEARCH_DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
+          </select>
+          <div className="hint">Direction each caliper searches for the boundary, relative to the centre.</div>
+        </div>
+      )}
       {spec.extras.map(([k, lab, sub]) => (
         <div className="field" key={k}>
           <NumberField label={lab} sub={sub} value={boundary[k]}
@@ -633,6 +654,7 @@ function BoundaryEditor({ spec, boundary, patch }) {
             max={k === 'smallAxis' || k === 'largeAxis' ? 1 : 360} onChange={(v) => patch({ [k]: v })} />
         </div>
       ))}
+      {axisError(spec, boundary) && <div className="err">⚠ {axisError(spec, boundary)}</div>}
     </div>
   );
 }
@@ -693,6 +715,8 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
   const curUnit = perUnit ? shape.units[shape.selUnit] : null;
   const segNoMask = shape.mode === 'segmentation' && !shape.classMask;
   const overlapErr = shape.mode === 'segmentation' && shape.drawn && shape.offMask;
+  const isBoxCaliper = spec.drawKind === 'box' || spec.drawKind === 'quad';
+  const axisErr = axisError(spec, perUnit ? curUnit.boundary : shape.boundary);
   const nameSuffix = shape.name && shape.name.startsWith(spec.prefix + '_') ? shape.name.slice(spec.prefix.length + 1) : (shape.name || '');
   const dupName = !!shape.name && (otherNames || []).includes(shape.name);
   const drawEnclosure = spec.drawKind === 'circle' ? 'Circle' : spec.drawKind === 'line' ? 'Line' : 'Box';
@@ -784,6 +808,9 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
               </button>
             )}
             {arming && <div className="hint">{spec.drawKind === 'circle' ? 'Drag from centre outward to set the radius.' : spec.drawKind === 'line' ? 'Drag from start to end point.' : 'Drag to draw the box enclosure.'}</div>}
+            {shape.drawn && isBoxCaliper && (
+              <div className="hint">The arrow (›) on the box shows the direction of search. To change the direction, rotate the box.</div>
+            )}
             {shape.drawn && shape.mode === 'segmentation' && !shape.offMask && <div className="okline">✓ Calipers overlap the segmentation mask</div>}
             {overlapErr && <div className="err">⚠ Drawn ROI has no overlap with the segmentation mask. Reposition / redraw the shape.</div>}
             {showErr && !shape.drawn && <div className="err">⚠ Draw the {drawEnclosure.toLowerCase()} enclosure before proceeding.</div>}
@@ -856,9 +883,9 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
 
           {/* Generate Shape */}
           {shape.drawn && (
-            <button className={'genbtn' + (shape.generated ? ' re' : '') + (overlapErr ? ' dis' : '')}
-              disabled={overlapErr}
-              onClick={() => { if (!overlapErr) set({ generated: true }); }}>
+            <button className={'genbtn' + (shape.generated ? ' re' : '') + (overlapErr || axisErr ? ' dis' : '')}
+              disabled={!!(overlapErr || axisErr)}
+              onClick={() => { if (!overlapErr && !axisErr) set({ generated: true }); }}>
               {shape.generated ? '↻ Regenerate shape trace' : '✦ Generate Shape'}
             </button>
           )}
@@ -933,6 +960,7 @@ function VisionConfig({ toast }) {
   const setupValid = typedShapes.length > 0 && namesUnique && shapes.every((s) => {
     if (!s.type || !s.drawn || !s.generated) return false;
     if (s.mode === 'segmentation' && (!s.classMask || s.offMask)) return false;
+    if (axisError(SHAPES[s.type], s.boundary)) return false;
     return true;
   });
 
@@ -1043,33 +1071,58 @@ function VisionConfig({ toast }) {
 
 /* ================= EDGE · EDIT MODULE CONFIGURATIONS ================= */
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const DIM_TYPE_OPTS = [
-  { v: 1, n: 'Angle' }, { v: 2, n: 'Distance' }, { v: 3, n: 'Area' },
-  { v: 4, n: 'Length' }, { v: 5, n: 'Convexity' }, { v: 6, n: 'ContourContinuity' },
-];
 const DIST_AXIS_OPTS = ['x', 'y', 'euclidean'];
 const EUC_MODE_OPTS = ['centre-to-centre', 'edge-to-edge', 'nearest'];
 const UNIT_OPTS = ['mm', 'mm²', '°', 'px'];
-// geometric features a shape exposes as a dimensioning endpoint
+
+// Per-shape dimensioning features, split by kind. Multi-line shapes flatten to "Edge 2 · Middle".
+// `closed` = eligible for whole-shape types (Area / Convexity / ContourContinuity).
+// Pure scalars (Radius, Perimeter, Circularity…) are intentionally excluded — those are module-level keys, not dimensions.
+const perLine = (label, n, parts) => { const o = []; for (let i = 1; i <= n; i++) parts.forEach((p) => o.push(`${label} ${i} · ${p}`)); return o; };
 const SHAPE_FEATURES = {
-  circle: ['Centre', 'Edge point', 'Radius'],
-  line: ['Start', 'End', 'Middle', 'Whole line'],
-  ellipse: ['Centre', 'Major axis', 'Minor axis', 'Focus 1', 'Focus 2'],
-  quad: ['Corner', 'Edge', 'Centre', 'Diagonal'],
-  parallel: ['Line 1', 'Line 2', 'Mid line'],
-  edge: ['Detected line'],
-  peak: ['Peak point'],
+  circle:   { points: ['Centre'], lines: [], closed: true },
+  line:     { points: ['Start', 'End', 'Middle'], lines: ['Whole line'], closed: false },
+  ellipse:  { points: ['Centre', 'Focus 1', 'Focus 2'], lines: ['Major axis', 'Minor axis'], closed: true },
+  quad:     { points: perLine('Edge', 4, ['Start', 'End', 'Middle', 'Centre']).concat(['Centre']),
+              lines: ['Edge 1', 'Edge 2', 'Edge 3', 'Edge 4', 'Diagonal 1', 'Diagonal 2'], closed: true },
+  parallel: { points: perLine('Line', 2, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2'], closed: false },
+  edge:     { points: perLine('Line', 3, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2', 'Line 3'], closed: false },
+  peak:     { points: ['Peak point'], lines: [], closed: false },
 };
-const unitForType = (t) => (t === 1 ? '°' : t === 3 ? 'mm²' : 'mm');
+// Type config: kind of feature consumed, whether a 2nd feature is needed, whether GT applies, default unit, extra controls.
+const DIM_TYPE_CFG = {
+  1: { name: 'Angle', kind: 'line', two: true, gt: true, unit: '°' },
+  2: { name: 'Distance', kind: 'point', two: true, gt: true, unit: 'mm', axis: true },
+  3: { name: 'Area', kind: 'shape', two: false, gt: true, unit: 'mm²' },
+  4: { name: 'Length', kind: 'line', two: false, gt: true, unit: 'mm', piecewise: true },
+  5: { name: 'Convexity', kind: 'shape', two: false, gt: false, unit: '' },
+  6: { name: 'ContourContinuity', kind: 'shape', two: false, gt: false, unit: '' },
+};
+const DIM_TYPE_OPTS = Object.entries(DIM_TYPE_CFG).map(([v, c]) => ({ v: Number(v), n: c.name }));
+const kindList = (type) => { const k = DIM_TYPE_CFG[type].kind; return k === 'point' ? 'points' : k === 'line' ? 'lines' : null; };
+const shapeQualifies = (shape, type) => {
+  const cfg = DIM_TYPE_CFG[type];
+  if (cfg.kind === 'shape') return !!SHAPE_FEATURES[shape.type].closed;
+  return SHAPE_FEATURES[shape.type][kindList(type)].length > 0;
+};
+const featuresOf = (shape, type) => { const k = kindList(type); return shape && k ? SHAPE_FEATURES[shape.type][k] : []; };
+function typeDefaults(type, shapes) {
+  const cfg = DIM_TYPE_CFG[type];
+  const valid = shapes.filter((s) => shapeQualifies(s, type));
+  const s0 = valid[0], s1 = valid[1] || valid[0];
+  const f = (s) => (cfg.kind === 'shape' || !s ? '' : (featuresOf(s, type)[0] || ''));
+  return {
+    shapeOneId: s0 ? s0.id : '', shapeOneSelector: f(s0),
+    shapeTwoId: cfg.two && s1 ? s1.id : '', shapeTwoSelector: cfg.two ? f(s1) : '',
+    unit: cfg.unit,
+  };
+}
 function makeDim(shapes, n) {
-  const s0 = shapes[0], s1 = shapes[1] || shapes[0];
-  const feat = (s) => (s ? (SHAPE_FEATURES[s.type] || [''])[0] : '');
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
     type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre', piecewise: false,
-    shapeOneId: s0 ? s0.id : '', shapeOneSelector: feat(s0),
-    shapeTwoId: s1 ? s1.id : '', shapeTwoSelector: feat(s1),
-    operator: 1, targetValue: 0, tolerance: 0, unit: 'mm', ratio: 0.05,
+    operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
+    ...typeDefaults(2, shapes),
   };
 }
 
@@ -1078,10 +1131,13 @@ function seedEdgeShapes() {
     const s = makeShape(type, name); s.drawn = true; s.generated = true; s.coords = coords;
     if (extra) Object.assign(s, extra); return s;
   };
+  const quad = mk('quad', 'Quadrilateral_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 });
+  quad.units = quad.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(250, 190, 190, 120)[i] }));
   return [
     mk('circle', 'Circle_1', { cx: 250, cy: 190, r: 90 }),
     mk('line', 'Line_1', { sx: 150, sy: 120, ex: 360, ey: 250, angle: 32 }),
     mk('ellipse', 'Ellipse_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 }, { mode: 'segmentation', classMask: 'm1' }),
+    quad,
   ];
 }
 // No dimensions are inherited from Vision — the operator authors them here.
@@ -1124,6 +1180,10 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
           {shape.mode === 'segmentation' && (
             <div className="field"><span className="tinylab">Segmentation Class Mask</span>
               <input className="roinput" value={(CLASS_MASKS.find((m) => m.id === shape.classMask) || {}).label || ''} readOnly /></div>
+          )}
+
+          {(spec.drawKind === 'box' || spec.drawKind === 'quad') && (
+            <div className="hint" style={{ marginBottom: 12 }}>The arrow (›) on the box shows the direction of search. To change the direction, rotate the box.</div>
           )}
 
           {/* Editable coordinates */}
@@ -1211,8 +1271,11 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
 
 function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
   const patch = (i, p) => { setDims((prev) => prev.map((d, idx) => idx === i ? { ...d, ...p } : d)); onDirty(); };
-  const shapeName = (id) => (shapes.find((s) => s.id === id) || {}).name || '';
-  const featOpts = (id) => { const s = shapes.find((x) => x.id === id); return s ? SHAPE_FEATURES[s.type] : []; };
+  const changeType = (i, type) => patch(i, { type, ...typeDefaults(type, shapes) });
+  const changeShape = (i, dim, which, id) => {
+    const sel = featuresOf(shapes.find((s) => s.id === id), dim.type)[0] || '';
+    patch(i, which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
+  };
   return (
     <div className="emc-dim">
       {dims.length === 0
@@ -1222,8 +1285,15 @@ function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
       <button className="addbtn" style={{ marginBottom: 16 }} onClick={onAdd}>＋ Add Dimension</button>
 
       {dims.map((dim, index) => {
-        const single = [3, 5, 6].includes(dim.type);   // Area / Convexity / ContourContinuity → one feature
-        const noGT = [5, 6].includes(dim.type);
+        const cfg = DIM_TYPE_CFG[dim.type];
+        const validShapes = shapes.filter((s) => shapeQualifies(s, dim.type));
+        const aFeats = featuresOf(shapes.find((s) => s.id === dim.shapeOneId), dim.type);
+        const bFeats = featuresOf(shapes.find((s) => s.id === dim.shapeTwoId), dim.type);
+        const shapeSelect = (val, onCh) => (
+          <select className="sel" value={val} onChange={onCh}>
+            {validShapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        );
         return (
           <div className="dimcard" key={dim.id}>
             <div className="dh">
@@ -1241,25 +1311,25 @@ function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
             {/* Type + type-dependent dropdowns */}
             <div className="row3" style={{ marginBottom: 12 }}>
               <div><span className="tinylab">Type</span>
-                <select className="sel" value={dim.type} onChange={(e) => { const t = Number(e.target.value); patch(index, { type: t, unit: unitForType(t) }); }}>
+                <select className="sel" value={dim.type} onChange={(e) => changeType(index, Number(e.target.value))}>
                   {DIM_TYPE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
                 </select>
               </div>
-              {dim.type === 2 && (
+              {cfg.axis && (
                 <div><span className="tinylab">Distance Axis</span>
                   <select className="sel" value={dim.distanceAxis} onChange={(e) => patch(index, { distanceAxis: e.target.value })}>
                     {DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}
                   </select>
                 </div>
               )}
-              {dim.type === 2 && dim.distanceAxis === 'euclidean' && (
+              {cfg.axis && dim.distanceAxis === 'euclidean' && (
                 <div><span className="tinylab">Euclidean Mode</span>
                   <select className="sel" value={dim.euclideanMode} onChange={(e) => patch(index, { euclideanMode: e.target.value })}>
                     {EUC_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}
                   </select>
                 </div>
               )}
-              {dim.type === 4 && (
+              {cfg.piecewise && (
                 <div><span className="tinylab">Piecewise</span>
                   <select className="sel" value={dim.piecewise ? 'Yes' : 'No'} onChange={(e) => patch(index, { piecewise: e.target.value === 'Yes' })}>
                     <option>No</option><option>Yes</option>
@@ -1268,38 +1338,34 @@ function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
               )}
             </div>
 
-            {/* Feature A */}
+            {/* Feature A (single-feature types show shape only) */}
             <div className="field">
-              <span className="tinylab">Feature A</span>
+              <span className="tinylab">{cfg.two ? 'Feature A' : 'Feature'}</span>
               <div className="feat">
-                <select className="sel" value={dim.shapeOneId} onChange={(e) => patch(index, { shapeOneId: e.target.value, shapeOneSelector: (featOpts(e.target.value)[0] || '') })}>
-                  {shapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                {!single && (
+                {shapeSelect(dim.shapeOneId, (e) => changeShape(index, dim, 'one', e.target.value))}
+                {cfg.kind !== 'shape' && (
                   <select className="sel" value={dim.shapeOneSelector} onChange={(e) => patch(index, { shapeOneSelector: e.target.value })}>
-                    {featOpts(dim.shapeOneId).map((f) => <option key={f}>{f}</option>)}
+                    {aFeats.map((f) => <option key={f}>{f}</option>)}
                   </select>
                 )}
               </div>
             </div>
 
             {/* Feature B (two-feature types only) */}
-            {!single && (
+            {cfg.two && (
               <div className="field">
                 <span className="tinylab">Feature B</span>
                 <div className="feat">
-                  <select className="sel" value={dim.shapeTwoId} onChange={(e) => patch(index, { shapeTwoId: e.target.value, shapeTwoSelector: (featOpts(e.target.value)[0] || '') })}>
-                    {shapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  {shapeSelect(dim.shapeTwoId, (e) => changeShape(index, dim, 'two', e.target.value))}
                   <select className="sel" value={dim.shapeTwoSelector} onChange={(e) => patch(index, { shapeTwoSelector: e.target.value })}>
-                    {featOpts(dim.shapeTwoId).map((f) => <option key={f}>{f}</option>)}
+                    {bFeats.map((f) => <option key={f}>{f}</option>)}
                   </select>
                 </div>
               </div>
             )}
 
             {/* Ground Truth (editable) */}
-            {!noGT && (
+            {cfg.gt && (
               <>
                 <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
                 <div className="gtgrid">
@@ -1318,10 +1384,12 @@ function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
                     </select>
                   </div>
                 </div>
-                <div className="field" style={{ marginTop: 10 }}>
-                  <span className="tinylab">Ratio (pixel to mm)</span>
-                  <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => patch(index, { ratio: Math.max(0, Number(e.target.value)) })} />
-                </div>
+                {cfg.kind !== 'line' || dim.type !== 1 ? (
+                  <div className="field" style={{ marginTop: 10 }}>
+                    <span className="tinylab">Ratio (pixel to mm)</span>
+                    <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => patch(index, { ratio: Math.max(0, Number(e.target.value)) })} />
+                  </div>
+                ) : null}
               </>
             )}
           </div>
