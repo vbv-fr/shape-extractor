@@ -43,6 +43,8 @@
   .canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:26px;min-height:0;}
   .frame{border:3px solid var(--orange);border-radius:4px;background:#11151a;box-shadow:0 6px 24px #0003;position:relative;}
   .frame .flabel{position:absolute;top:-11px;left:12px;background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:1px 8px;border-radius:3px;letter-spacing:.3px;}
+  .eye-toggle{position:absolute;top:7px;right:7px;z-index:6;display:flex;align-items:center;gap:5px;background:#ffffffee;border:1px solid var(--line);border-radius:7px;padding:4px 8px;font-size:11px;font-weight:600;color:var(--muted);box-shadow:0 1px 2px #0000001a;}
+  .eye-toggle.on{color:var(--blue);border-color:#b9d0ff;}
   .drawhint{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:#111826de;color:#fff;
     font-size:11px;padding:6px 12px;border-radius:20px;z-index:5;display:flex;gap:7px;align-items:center;white-space:nowrap;}
   .drawhint.arm{background:#e8542bee;}
@@ -122,6 +124,12 @@
   .genbtn:hover{background:var(--green-d);}
   .genbtn.dis{background:#cdd2d6;cursor:not-allowed;}
   .genbtn.re{background:#fff;color:var(--green-d);border:1px solid var(--green);}
+  .row2btn{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+  .row2btn .drawbtn,.row2btn .genbtn{width:100%;}
+  .configlink{display:flex;align-items:center;gap:6px;background:transparent;border:0;padding:2px 0;color:var(--blue);font-size:12px;font-weight:700;cursor:pointer;}
+  .configlink:hover{text-decoration:underline;}
+  .configlink .chev{font-size:10px;}
+  .config-body{margin-top:10px;border-left:2px solid #e6eefc;padding-left:10px;}
   .miniauto{font-size:10px;color:var(--muted);background:#f2f4f5;border-radius:5px;padding:4px 7px;display:inline-block;}
   .block-t{font-size:11px;font-weight:700;color:#3d4247;text-transform:uppercase;letter-spacing:.4px;margin:2px 0 8px;display:flex;align-items:center;gap:6px;}
   .block-t .ln{flex:1;height:1px;background:#eef0f1;}
@@ -202,14 +210,14 @@ const { useState, useMemo, useCallback, useRef, useEffect, Fragment } = React;
 const BOUNDARY_TYPES = ['Strongest Edge', 'First Edge', 'Last Edge'];
 const POLARITIES = ['Both', 'Light to Dark', 'Dark to Light'];
 const SEARCH_DIRECTIONS = ['Towards the Centre', 'Away from Centre'];
-const MIN_AXIS_GAP = 0.1;
-// Large ellipse axis must sit at least MIN_AXIS_GAP outside the small one.
+const FILTER_SIZES = [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31];  // odd only (single centre pixel)
+// Small ellipse axis must be strictly less than the large ellipse axis.
 const axisError = (spec, boundary) => {
   if (!spec.extras.some(([k]) => k === 'largeAxis')) return null;
   const small = Number(boundary.smallAxis), large = Number(boundary.largeAxis);
   if (!Number.isFinite(small) || !Number.isFinite(large)) return null;
-  return large < small + MIN_AXIS_GAP
-    ? `Large ellipse axis must be at least ${MIN_AXIS_GAP} greater than the small ellipse axis (currently ${small} → needs ≥ ${(small + MIN_AXIS_GAP).toFixed(2)}).`
+  return small >= large
+    ? `Small ellipse axis must be less than the large ellipse axis (currently small ${small} ≥ large ${large}).`
     : null;
 };
 
@@ -217,7 +225,7 @@ const SHAPES = {
   circle: {
     label: 'Circle', prefix: 'Circle', drawKind: 'circle', coordTitle: 'Circle Coordinates',
     hasCaliperType: true, caliperTypes: ['Circle Caliper', 'Sector Caliper'], caliperViz: true,
-    caliperParams: ['number', 'height'], caliperNote: 'Caliper width is auto-derived — calipers evenly distributed around the circle.',
+    caliperParams: ['number', 'height', 'width'], caliperNote: '',
     coordsByCaliper: {
       'Circle Caliper': [['cx', 'Centre X'], ['cy', 'Centre Y'], ['r', 'Radius']],
       'Sector Caliper': [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['r', 'Radius']],
@@ -227,10 +235,10 @@ const SHAPES = {
     outputs: ['Centre', 'Radius', 'Perimeter', 'Area', 'Circularity', 'Convexity', 'Contour Continuity'],
   },
   line: {
-    label: 'Line', prefix: 'Line', drawKind: 'line', coordTitle: 'Line Coordinates',
+    label: 'Line', prefix: 'Line', drawKind: 'box', coordTitle: 'Line ROI Coordinates',
     hasCaliperType: false, caliperViz: true,
-    caliperParams: ['number', 'width', 'height'], caliperNote: '',
-    coords: [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['angle', 'Angle°']],
+    caliperParams: ['number', 'height', 'width'], caliperNote: '',
+    coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: [...BOUNDARY_TYPES, 'Close to Mid'], polarity: true, threshold: true, window: true },
     extras: [], general: [], perUnit: null,
     outputs: ['Start', 'End', 'Middle', 'Angle', 'Length'],
@@ -238,18 +246,18 @@ const SHAPES = {
   ellipse: {
     label: 'Ellipse', prefix: 'Ellipse', drawKind: 'box', coordTitle: 'Box Coordinates',
     hasCaliperType: false, caliperViz: false,
-    caliperParams: ['number'], caliperNote: 'Caliper width & height are auto-derived from the box dimensions.',
+    caliperParams: ['number', 'height', 'width'], caliperNote: '',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false, searchDirection: true },
-    extras: [['smallAxis', 'Small Ellipse Axis', '0–1 · ratio of small ellipse axis to box length'],
-             ['largeAxis', 'Large Ellipse Axis', '0–1 · ratio of large ellipse axis to box length']],
+    extras: [['smallAxis', 'Small Ellipse Axis', 'ratio of small ellipse axis to box length (must be < large)'],
+             ['largeAxis', 'Large Ellipse Axis', 'ratio of large ellipse axis to box length']],
     general: [], perUnit: null,
     outputs: ['Centre', 'Focii', 'Major axis', 'Minor axis', 'Angle'],
   },
   quad: {
     label: 'Quadrilateral', prefix: 'Quadrilateral', drawKind: 'quad', coordTitle: 'Box Coordinates',
     hasCaliperType: false, caliperViz: false,
-    caliperParams: ['number'], caliperNote: 'Caliper height & caliper width are derived from the box dimensions and number of calipers.',
+    caliperParams: ['number', 'height', 'width'], caliperNote: '',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true },
     extras: [], general: [],
@@ -259,7 +267,7 @@ const SHAPES = {
   parallel: {
     label: 'Parallel Line Search', prefix: 'ParallelLine', drawKind: 'box', coordTitle: 'Box Coordinates',
     hasCaliperType: false, caliperViz: false,
-    caliperParams: ['number'], caliperNote: 'Caliper width & height are auto-derived from the box dimensions.',
+    caliperParams: ['number', 'height', 'width'], caliperNote: '',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
     extras: [], general: [['maxAngleDiff', 'Max Angle Difference', 'degrees · angle difference allowed between the two lines']],
@@ -269,7 +277,7 @@ const SHAPES = {
   edge: {
     label: 'Edge Search', prefix: 'EdgeSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
     hasCaliperType: false, caliperViz: false,
-    caliperParams: [], caliperNote: '',
+    caliperParams: ['height', 'width'], caliperNote: '',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: [...BOUNDARY_TYPES, 'All'], polarity: true, threshold: true, window: true },
     extras: [['maxResults', 'Maximum Result Number', 'max number of edges to return']],
@@ -279,7 +287,7 @@ const SHAPES = {
   peak: {
     label: 'Peak Search', prefix: 'PeakSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
     hasCaliperType: false, caliperViz: false,
-    caliperParams: [], caliperNote: '',
+    caliperParams: ['height', 'width'], caliperNote: '',
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: null, polarity: true, threshold: true, window: true },
     extras: [], general: [], perUnit: null, peak: true,
@@ -316,7 +324,7 @@ function defaultBoundary(spec) {
   const b = { polarity: 'Both', threshold: 128, window: 5 };
   if (spec.boundary.types) b.type = spec.boundary.types[0];
   if (spec.boundary.searchDirection) b.searchDirection = SEARCH_DIRECTIONS[0];
-  spec.extras.forEach(([k]) => { b[k] = k === 'smallAxis' ? 0.4 : k === 'largeAxis' ? 0.9 : k === 'maxResults' ? 8 : 0; });
+  spec.extras.forEach(([k]) => { b[k] = k === 'smallAxis' ? 0.8 : k === 'largeAxis' ? 1.2 : k === 'maxResults' ? 8 : 0; });
   return b;
 }
 function defaultCaliper(spec) { const o = {}; spec.caliperParams.forEach((k) => (o[k] = CALIPER_PARAM_META[k].def)); return o; }
@@ -404,32 +412,52 @@ function Chevron({ p0, p1, color }) {
   const b = [mx - s * Math.cos(ang + 0.6), my - s * Math.sin(ang + 0.6)];
   return <polyline points={`${a[0]},${a[1]} ${tip[0]},${tip[1]} ${b[0]},${b[1]}`} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />;
 }
-function ShapeOverlay({ shape, draft, drawKind }) {
+function ShapeOverlay({ shape, draft, drawKind, showCal }) {
   const BLUE = '#2f6fed', GREEN = '#56b733', RED = '#e0473a', PURPLE = '#7c3aed', ORANGE = '#e8542b';
   const dot = (x, y, c, k) => <circle key={k} cx={x} cy={y} r="2.4" fill={c} stroke="#fff" strokeWidth=".6" />;
 
-  // live draft while sketching
+  // live draft while sketching (circle = drag radius; everything else = rectangular ROI)
   if (draft) {
     if (drawKind === 'circle') {
       const r = Math.hypot(draft.x1 - draft.x0, draft.y1 - draft.y0);
       return <g><circle cx={draft.x0} cy={draft.y0} r={r} fill="#e8542b18" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" /><circle cx={draft.x0} cy={draft.y0} r="2.5" fill={ORANGE} /></g>;
     }
-    if (drawKind === 'line') return <line x1={draft.x0} y1={draft.y0} x2={draft.x1} y2={draft.y1} stroke={ORANGE} strokeWidth="2" strokeDasharray="4 3" />;
     const x = Math.min(draft.x0, draft.x1), y = Math.min(draft.y0, draft.y1);
     return <rect x={x} y={y} width={Math.abs(draft.x1 - draft.x0)} height={Math.abs(draft.y1 - draft.y0)} fill="#e8542b18" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />;
   }
   if (!shape || !shape.drawn) return null;
   const spec = SHAPES[shape.type], c = shape.coords, gen = shape.generated;
+  const cal = shape.caliper || {};
+  const halfH = Math.min(Math.max((cal.height || 40) * 0.22, 7), 24);   // caliper search half-length (viz)
+  const halfW = Math.min(Math.max((cal.width || 10) * 0.5, 2.4), 7);    // caliper half-width (viz)
+  // rotated caliper rectangle: theta = direction of the caliper's HEIGHT (search) axis
+  const calRect = (px, py, hw, hh, theta) => {
+    const ux = Math.cos(theta), uy = Math.sin(theta), vx = -Math.sin(theta), vy = Math.cos(theta);
+    const cc = (sh, sw) => [px + ux * sh + vx * sw, py + uy * sh + vy * sw];
+    return [cc(hh, hw), cc(hh, -hw), cc(-hh, -hw), cc(-hh, hw)].map((p) => p.join(',')).join(' ');
+  };
+  const CalBox = ({ pts, k }) => <polygon key={k} points={pts} fill="#2f6fed22" stroke={BLUE} strokeWidth="1.1" />;
+  // tile n caliper boxes along a box's long (width) axis, searching across (height)
+  const tileCal = (bx, by, bw, bh, bangDeg, n) => {
+    const a = bangDeg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+    const hh = Math.min(halfH, (bh / 2) * 0.85);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n - 0.5) * bw * 0.92;
+      out.push(<CalBox key={'tc' + i} k={'tc' + i} pts={calRect(bx + ux * t, by + uy * t, halfW, hh, a + Math.PI / 2)} />);
+    }
+    return out;
+  };
 
   /* ---- Circle / Sector ---- */
   if (shape.type === 'circle') {
     const cx = c.cx ?? 250, cy = c.cy ?? 190, r = c.r ?? 90;
     const sector = shape.caliperType === 'Sector Caliper';
     const a0 = sector ? -0.5 : 0, a1 = sector ? 2.6 : Math.PI * 2;
-    const n = Math.min(shape.caliper.number || 12, 40), cal = [], dots = [];
+    const n = Math.min(cal.number || 12, 40), rects = [], dots = [];
     for (let i = 0; i < n; i++) {
-      const a = a0 + (a1 - a0) * (i / (sector ? n - 1 : n)); const ir = r - 15, or_ = r + 15;
-      cal.push(<line key={'c' + i} x1={cx + ir * Math.cos(a)} y1={cy + ir * Math.sin(a)} x2={cx + or_ * Math.cos(a)} y2={cy + or_ * Math.sin(a)} stroke={BLUE} strokeWidth="1.4" opacity=".8" />);
+      const a = a0 + (a1 - a0) * (i / (sector ? n - 1 : n));
+      rects.push(<CalBox key={'c' + i} k={'c' + i} pts={calRect(cx + r * Math.cos(a), cy + r * Math.sin(a), halfW, halfH, a)} />);
       if (gen) { const er = r + wob(i, 4); dots.push(dot(cx + er * Math.cos(a), cy + er * Math.sin(a), GREEN, 'd' + i)); }
     }
     return (
@@ -437,36 +465,14 @@ function ShapeOverlay({ shape, draft, drawKind }) {
         {sector
           ? <path d={`M ${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)} A ${r} ${r} 0 1 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`} fill="none" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
           : <circle cx={cx} cy={cy} r={r} fill="none" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />}
-        {cal}{dots}
+        {showCal && rects}{dots}
         {gen && <circle cx={cx} cy={cy} r={r} fill="none" stroke={GREEN} strokeWidth="2" />}
         <circle cx={cx} cy={cy} r="2.5" fill={ORANGE} />
         <text x={cx} y={cy - r - 20} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || 'Circle'} · {shape.caliperType}</text>
       </g>
     );
   }
-  /* ---- Line ---- */
-  if (shape.type === 'line') {
-    const x1 = c.sx ?? 150, y1 = c.sy ?? 120, x2 = c.ex ?? 360, y2 = c.ey ?? 250;
-    const n = Math.min(shape.caliper.number || 12, 30);
-    const ang = Math.atan2(y2 - y1, x2 - x1), nx = -Math.sin(ang), ny = Math.cos(ang);
-    const h = (shape.caliper.height || 40) * 0.4, cal = [], dots = [];
-    for (let i = 0; i < n; i++) {
-      const t = i / (n - 1), px = x1 + (x2 - x1) * t, py = y1 + (y2 - y1) * t;
-      cal.push(<line key={'l' + i} x1={px - nx * h} y1={py - ny * h} x2={px + nx * h} y2={py + ny * h} stroke={BLUE} strokeWidth="1.3" opacity=".75" />);
-      if (gen) { const off = wob(i, 6); dots.push(dot(px + nx * off, py + ny * off, GREEN, 'ld' + i)); }
-    }
-    return (
-      <g>
-        {cal}
-        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={ORANGE} strokeWidth="1.4" strokeDasharray="4 3" />
-        {dots}
-        {gen && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={GREEN} strokeWidth="2" />}
-        <Chevron p0={[x1, y1]} p1={[x2, y2]} color={PURPLE} />
-        <text x={(x1 + x2) / 2} y={Math.min(y1, y2) - 14} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || 'Line'}</text>
-      </g>
-    );
-  }
-  /* ---- Quadrilateral (4 boxes) ---- */
+  /* ---- Quadrilateral (4 boxes, calipers along each edge box) ---- */
   if (shape.type === 'quad') {
     const units = shape.units || [];
     return (
@@ -474,9 +480,11 @@ function ShapeOverlay({ shape, draft, drawKind }) {
         {units.map((u, i) => {
           const cc = u.coords, cor = boxCorners(cc.cx, cc.cy, cc.w, cc.h, cc.angle);
           const sel = shape.selUnit === i;
+          const n = Math.min((u.caliper && u.caliper.number) || 8, 20);
           return (
             <g key={i}>
               <polygon points={cor.map((p) => p.join(',')).join(' ')} fill={sel ? '#e8542b18' : '#2f6fed10'} stroke={sel ? ORANGE : RED} strokeWidth={sel ? '2' : '1.4'} strokeDasharray="4 2" />
+              {showCal && tileCal(cc.cx, cc.cy, cc.w, cc.h, cc.angle, n)}
               <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
               <text x={cc.cx} y={cc.cy + 3} fill={sel ? ORANGE : RED} fontSize="9" fontWeight="700" textAnchor="middle">B{i + 1}</text>
               {gen && cor.map((p, k) => dot(p[0], p[1], GREEN, 'q' + i + k))}
@@ -491,48 +499,77 @@ function ShapeOverlay({ shape, draft, drawKind }) {
       </g>
     );
   }
-  /* ---- Box shapes: ellipse / parallel / edge / peak ---- */
+  /* ---- Rectangular-ROI shapes: line / ellipse / parallel / edge / peak ---- */
   const cx = c.cx ?? 250, cy = c.cy ?? 190, w = c.w ?? 190, h = c.h ?? 120, ang = c.angle || 0;
   const cor = boxCorners(cx, cy, w, h, ang);
   const rad = ang * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
   const local = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
-  let inner = null;
-  if (gen && shape.type === 'ellipse') {
-    inner = <g>
+  const n = Math.min(cal.number || 12, 30);
+  let calipers = null, inner = null, extraGuide = null;
+
+  if (shape.type === 'ellipse') {
+    const sA = Number(shape.boundary.smallAxis ?? 0.8), lA = Number(shape.boundary.largeAxis ?? 1.2);
+    // radial calipers around the mid band
+    const rects = [];
+    const nn = Math.min(cal.number || 12, 28);
+    for (let i = 0; i < nn; i++) {
+      const t = (i / nn) * Math.PI * 2;
+      const p = local((w / 2) * Math.cos(t), (h / 2) * Math.sin(t));
+      const theta = Math.atan2(p[1] - cy, p[0] - cx);
+      rects.push(<CalBox key={'e' + i} k={'e' + i} pts={calRect(p[0], p[1], halfW, halfH, theta)} />);
+      if (gen) dot(p[0], p[1], GREEN, 'ed' + i);
+    }
+    calipers = rects;
+    // small + large ellipse guides + axis markers at the TOP end
+    const topS = local(0, -(h / 2) * sA), topL = local(0, -(h / 2) * lA);
+    extraGuide = <g>
+      <ellipse cx={cx} cy={cy} rx={(w / 2) * lA} ry={(h / 2) * lA} fill="none" stroke={BLUE} strokeWidth="1" strokeDasharray="3 2" opacity=".6" transform={`rotate(${ang} ${cx} ${cy})`} />
+      <ellipse cx={cx} cy={cy} rx={(w / 2) * sA} ry={(h / 2) * sA} fill="none" stroke={BLUE} strokeWidth="1" strokeDasharray="3 2" opacity=".6" transform={`rotate(${ang} ${cx} ${cy})`} />
+      <circle cx={topS[0]} cy={topS[1]} r="3" fill={BLUE} /><text x={topS[0] + 6} y={topS[1] - 2} fill={BLUE} fontSize="9" fontWeight="700">S {sA}</text>
+      <circle cx={topL[0]} cy={topL[1]} r="3" fill={PURPLE} /><text x={topL[0] + 6} y={topL[1] - 2} fill={PURPLE} fontSize="9" fontWeight="700">L {lA}</text>
+    </g>;
+    if (gen) inner = <g>
       <ellipse cx={cx} cy={cy} rx={w / 2} ry={h / 2} fill="none" stroke={GREEN} strokeWidth="2" transform={`rotate(${ang} ${cx} ${cy})`} />
-      <ellipse cx={cx} cy={cy} rx={(w / 2) * (shape.boundary.smallAxis || .4)} ry={(h / 2) * (shape.boundary.smallAxis || .4)} fill="none" stroke={BLUE} strokeWidth="1" strokeDasharray="3 2" opacity=".7" transform={`rotate(${ang} ${cx} ${cy})`} />
-      {Array.from({ length: Math.min(shape.caliper.number || 12, 26) }).map((_, i) => {
-        const t = (i / (shape.caliper.number || 12)) * Math.PI * 2;
-        return dot(cx + (w / 2) * Math.cos(t) * cos - (h / 2) * Math.sin(t) * sin, cy + (w / 2) * Math.cos(t) * sin + (h / 2) * Math.sin(t) * cos, GREEN, 'e' + i);
-      })}
+      {Array.from({ length: nn }).map((_, i) => { const t = (i / nn) * Math.PI * 2; const p = local((w / 2) * Math.cos(t), (h / 2) * Math.sin(t)); return dot(p[0], p[1], GREEN, 'eg' + i); })}
     </g>;
-  } else if (gen && shape.type === 'parallel') {
-    const off = h / 3.2;
-    inner = <g>
-      <line {...seg(local(-w / 2, -off), local(w / 2, -off))} stroke={GREEN} strokeWidth="2" />
-      <line {...seg(local(-w / 2, off), local(w / 2, off))} stroke={GREEN} strokeWidth="2" />
-      {[-off, off].map((o, k) => Array.from({ length: 7 }).map((_, i) => { const p = local(-w / 2 + w * (i / 6), o + wob(i + k, 4)); return dot(p[0], p[1], k ? BLUE : GREEN, 'p' + k + i); }))}
-    </g>;
-  } else if (gen && shape.type === 'edge') {
-    inner = <g>{[-30, 0, 34].map((o, k) => <line key={k} {...seg(local(-w / 2, o), local(w / 2, o))} stroke={[GREEN, BLUE, PURPLE][k]} strokeWidth="1.8" opacity=".9" />)}</g>;
-  } else if (gen && shape.type === 'peak') {
-    const pts = Array.from({ length: 9 }).map((_, i) => local(wob(i, w * .38), wob(i + 3, h * .32)));
-    inner = <g>{pts.map((p, i) => dot(p[0], p[1], '#9aa4b2', 'pk' + i))}<circle cx={pts[3][0]} cy={pts[3][1]} r="5" fill="none" stroke={ORANGE} strokeWidth="2" /><circle cx={pts[3][0]} cy={pts[3][1]} r="2.6" fill={ORANGE} /></g>;
+  } else {
+    calipers = tileCal(cx, cy, w, h, ang, n);
+    if (shape.type === 'line' && gen) {
+      const a = local(-w / 2, 0), b = local(w / 2, 0);
+      inner = <g><line {...seg(a, b)} stroke={GREEN} strokeWidth="2" />{Array.from({ length: n }).map((_, i) => { const t = (i + 0.5) / n; const p = local(-w / 2 + w * t, wob(i, h * 0.12)); return dot(p[0], p[1], GREEN, 'lg' + i); })}</g>;
+    } else if (shape.type === 'parallel' && gen) {
+      const off = h / 3.2;
+      inner = <g><line {...seg(local(-w / 2, -off), local(w / 2, -off))} stroke={GREEN} strokeWidth="2" /><line {...seg(local(-w / 2, off), local(w / 2, off))} stroke={GREEN} strokeWidth="2" />{[-off, off].map((o, k) => Array.from({ length: 7 }).map((_, i) => { const p = local(-w / 2 + w * (i / 6), o + wob(i + k, 4)); return dot(p[0], p[1], k ? BLUE : GREEN, 'p' + k + i); }))}</g>;
+    } else if (shape.type === 'edge' && gen) {
+      inner = <g>{[-30, 0, 34].map((o, k) => <line key={k} {...seg(local(-w / 2, o), local(w / 2, o))} stroke={[GREEN, BLUE, PURPLE][k]} strokeWidth="1.8" opacity=".9" />)}</g>;
+    } else if (shape.type === 'peak' && gen) {
+      const pts = Array.from({ length: 9 }).map((_, i) => local(wob(i, w * .38), wob(i + 3, h * .32)));
+      inner = <g>{pts.map((p, i) => dot(p[0], p[1], '#9aa4b2', 'pk' + i))}<circle cx={pts[3][0]} cy={pts[3][1]} r="5" fill="none" stroke={ORANGE} strokeWidth="2" /><circle cx={pts[3][0]} cy={pts[3][1]} r="2.6" fill={ORANGE} /></g>;
+    }
   }
   return (
     <g>
       <polygon points={cor.map((p) => p.join(',')).join(' ')} fill="#2f6fed0f" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
+      {extraGuide}
+      {showCal && calipers}
       <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
       {inner}
-      <text x={cx} y={cy + h / 2 + 26} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || spec.label} · Box Caliper</text>
+      <text x={cx} y={cy + h / 2 + 26} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || spec.label}{shape.type === 'line' ? ' · Line ROI' : ' · Box Caliper'}</text>
     </g>
   );
 }
 function seg(a, b) { return { x1: a[0], y1: a[1], x2: b[0], y2: b[1] }; }
 
+function EyeIcon({ on }) {
+  return on
+    ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
+    : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+}
+
 function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
   const svgRef = useRef(null);
   const [draft, setDraft] = useState(null);
+  const [showCal, setShowCal] = useState(true);
   const rotRef = useRef(false);
   const drawKind = activeShape && activeShape.type ? SHAPES[activeShape.type].drawKind : null;
 
@@ -559,10 +596,10 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
   };
   const geoFromDraft = (d) => ({ x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1 });
 
-  // rotate handle position for box shapes (after drawn, not arming)
+  // rotate handle position for box-ROI shapes (after drawn, not arming)
   let handle = null;
   if (activeShape && activeShape.drawn && !arming && activeShape.type &&
-      ['ellipse', 'parallel', 'edge', 'peak'].includes(activeShape.type)) {
+      ['line', 'ellipse', 'parallel', 'edge', 'peak'].includes(activeShape.type)) {
     const c = activeShape.coords; const cor = boxCorners(c.cx ?? 250, c.cy ?? 190, c.w ?? 190, c.h ?? 120, c.angle || 0);
     handle = cor[1];
   }
@@ -571,6 +608,10 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
     <div className="canvas-wrap">
       <div className="frame">
         <span className="flabel">INPUT IMAGE</span>
+        <button className={'eye-toggle' + (showCal ? ' on' : '')} title={showCal ? 'Hide calipers' : 'Show calipers'}
+          onClick={() => setShowCal((v) => !v)}>
+          <EyeIcon on={showCal} /> Calipers
+        </button>
         <svg ref={svgRef} width="500" height="380" viewBox="0 0 500 380"
           style={{ cursor: arming ? 'crosshair' : 'default', touchAction: 'none' }}
           onMouseDown={down} onMouseMove={move} onMouseUp={up} onMouseLeave={up}>
@@ -586,7 +627,7 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
           <circle cx="250" cy="190" r="46" fill="#2b3138" stroke="#12161a" strokeWidth="1.5" />
           {[[150,100],[350,100],[150,280],[350,280]].map((p,i)=>(<circle key={i} cx={p[0]} cy={p[1]} r="9" fill="#22282e" stroke="#0d1114" strokeWidth="1.5" />))}
           {segMode && (<g><circle cx={MASK.cx} cy={MASK.cy} r={MASK.r} fill="#7c3aed" opacity=".26" /><text x={MASK.cx} y="300" fill="#c9b3ff" fontSize="10" textAnchor="middle" fontWeight="700">SEGMENTATION MASK (ROI)</text></g>)}
-          <ShapeOverlay shape={activeShape} draft={draft} drawKind={drawKind} />
+          <ShapeOverlay shape={activeShape} draft={draft} drawKind={drawKind} showCal={showCal} />
           {handle && !draft && (
             <g onMouseDown={(e) => { e.stopPropagation(); rotRef.current = true; }} style={{ cursor: 'grab' }}>
               <line x1={activeShape.coords.cx} y1={activeShape.coords.cy} x2={handle[0]} y2={handle[1]} stroke="#e8542b" strokeWidth="1" opacity=".5" />
@@ -636,7 +677,12 @@ function BoundaryEditor({ spec, boundary, patch }) {
         )}
       </div>
       {spec.boundary.window && (
-        <div className="field"><NumberField label="Observing Window" value={boundary.window} min={1} max={50} onChange={(v) => patch({ window: v })} /></div>
+        <div className="field">
+          <span className="tinylab">Observing Window (Filter Size)</span>
+          <select className="sel" value={boundary.window} onChange={(e) => patch({ window: Number(e.target.value) })}>
+            {FILTER_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
       )}
       {spec.boundary.searchDirection && (
         <div className="field">
@@ -651,7 +697,7 @@ function BoundaryEditor({ spec, boundary, patch }) {
         <div className="field" key={k}>
           <NumberField label={lab} sub={sub} value={boundary[k]}
             step={k === 'smallAxis' || k === 'largeAxis' ? 0.05 : 1} min={0}
-            max={k === 'smallAxis' || k === 'largeAxis' ? 1 : 360} onChange={(v) => patch({ [k]: v })} />
+            max={k === 'smallAxis' || k === 'largeAxis' ? 2 : 360} onChange={(v) => patch({ [k]: v })} />
         </div>
       ))}
       {axisError(spec, boundary) && <div className="err">⚠ {axisError(spec, boundary)}</div>}
@@ -681,6 +727,7 @@ function TrashIcon() {
 
 function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr, nameOptions, otherNames, onArmDraw, arming }) {
   const [confirm, setConfirm] = useState(null);
+  const [caliperOpen, setCaliperOpen] = useState(false);
   const set = (patch) => onChange({ ...shape, ...patch });
   const hasWork = shape.drawn || shape.generated;
   const guard = (applyFn) => { if (hasWork) setConfirm(() => applyFn); else applyFn(); };
@@ -719,7 +766,7 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
   const axisErr = axisError(spec, perUnit ? curUnit.boundary : shape.boundary);
   const nameSuffix = shape.name && shape.name.startsWith(spec.prefix + '_') ? shape.name.slice(spec.prefix.length + 1) : (shape.name || '');
   const dupName = !!shape.name && (otherNames || []).includes(shape.name);
-  const drawEnclosure = spec.drawKind === 'circle' ? 'Circle' : spec.drawKind === 'line' ? 'Line' : 'Box';
+  const drawEnclosure = spec.drawKind === 'circle' ? 'Circle' : shape.type === 'line' ? 'Line ROI' : 'Box';
 
   const changeType = (t) => guard(() => onChange({ ...makeShape(t), id: shape.id, mode: shape.mode, classMask: shape.classMask, name: nameOptions(t)[0] || '' }));
   const changeMode = (m) => guard(() => set({ mode: m, drawn: false, generated: false, offMask: false, coords: {} }));
@@ -788,32 +835,43 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
             </div>
           )}
 
-          {/* Caliper Type (circle) + Draw on the same row; else Draw full width */}
+          {/* Caliper Type (circle only) */}
+          {spec.hasCaliperType && (
+            <div className="field">
+              <span className="tinylab">Caliper Type</span>
+              <select className="sel" value={shape.caliperType} onChange={(e) => changeCaliperType(e.target.value)}>
+                {spec.caliperTypes.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* Draw + Generate (Generate sits next to Redraw once drawn) */}
           <div className="field">
-            {spec.hasCaliperType ? (
-              <div className="rowcta">
-                <div>
-                  <span className="tinylab">Caliper Type</span>
-                  <select className="sel" value={shape.caliperType} onChange={(e) => changeCaliperType(e.target.value)}>
-                    {spec.caliperTypes.map((t) => <option key={t}>{t}</option>)}
-                  </select>
-                </div>
-                <button className={'drawbtn ' + (arming ? 'armed' : shape.drawn ? 'done' : '')} onClick={onArmDraw}>
-                  {arming ? '◉ Sketching…' : shape.drawn ? '↻ Redraw' : '✎ Draw ' + drawEnclosure}
+            {arming ? (
+              <button className="drawbtn armed" onClick={onArmDraw}>◉ Sketching on canvas…</button>
+            ) : shape.drawn ? (
+              <div className="row2btn">
+                <button className="drawbtn done" onClick={onArmDraw}>↻ Redraw</button>
+                <button className={'genbtn' + (shape.generated ? ' re' : '') + (overlapErr || axisErr ? ' dis' : '')}
+                  disabled={!!(overlapErr || axisErr)}
+                  onClick={() => { if (!overlapErr && !axisErr) set({ generated: true }); }}>
+                  {shape.generated ? '↻ Regenerate' : '✦ Generate Shape'}
                 </button>
               </div>
             ) : (
-              <button className={'drawbtn ' + (arming ? 'armed' : shape.drawn ? 'done' : '')} onClick={onArmDraw}>
-                {arming ? '◉ Sketching on canvas…' : shape.drawn ? '↻ Redraw ' + drawEnclosure + ' on canvas' : '✎ Draw ' + drawEnclosure + (spec.drawKind === 'quad' ? ' (Quadra Box)' : '') + ' on canvas'}
+              <button className="drawbtn" onClick={onArmDraw}>
+                ✎ Draw {drawEnclosure}{spec.drawKind === 'quad' ? ' (Quadra Box)' : ''} on canvas
               </button>
             )}
-            {arming && <div className="hint">{spec.drawKind === 'circle' ? 'Drag from centre outward to set the radius.' : spec.drawKind === 'line' ? 'Drag from start to end point.' : 'Drag to draw the box enclosure.'}</div>}
+            {arming && <div className="hint">{spec.drawKind === 'circle' ? 'Drag from centre outward to set the radius.' : 'Drag to draw the rectangular ROI.'}</div>}
             {shape.drawn && isBoxCaliper && (
               <div className="hint">The arrow (›) on the box shows the direction of search. To change the direction, rotate the box.</div>
             )}
             {shape.drawn && shape.mode === 'segmentation' && !shape.offMask && <div className="okline">✓ Calipers overlap the segmentation mask</div>}
             {overlapErr && <div className="err">⚠ Drawn ROI has no overlap with the segmentation mask. Reposition / redraw the shape.</div>}
-            {showErr && !shape.drawn && <div className="err">⚠ Draw the {drawEnclosure.toLowerCase()} enclosure before proceeding.</div>}
+            {shape.drawn && axisErr && <div className="err">⚠ Fix the ellipse axis values below before generating.</div>}
+            {shape.generated && <div className="okline">✓ Shape trace generated on canvas</div>}
+            {showErr && !shape.drawn && <div className="err">⚠ Draw the {drawEnclosure.toLowerCase()} before proceeding.</div>}
           </div>
 
           {/* Coordinates */}
@@ -836,24 +894,27 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
             </div>
           )}
 
-          {/* Caliper Parameters */}
-          {shape.drawn && (spec.caliperParams.length > 0 ? (
+          {/* Caliper Parameters — collapsed under a "Configure Calipers" link */}
+          {shape.drawn && (
             <div className="field">
-              <div className="block-t">Caliper Parameters{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
-              <div className="row2">
-                {spec.caliperParams.map((k) => {
-                  const meta = CALIPER_PARAM_META[k];
-                  const usePer = perUnit && perUnit.perCaliper;
-                  const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
-                  const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
-                  return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
-                })}
-              </div>
-              {spec.caliperNote && <div className="hint">{spec.caliperNote}</div>}
+              <button className="configlink" onClick={() => setCaliperOpen((v) => !v)}>
+                <span className="chev">{caliperOpen ? '▾' : '▸'}</span> Configure Calipers{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''}
+              </button>
+              {caliperOpen && (
+                <div className="config-body">
+                  <div className="row2">
+                    {spec.caliperParams.map((k) => {
+                      const meta = CALIPER_PARAM_META[k];
+                      const usePer = perUnit && perUnit.perCaliper;
+                      const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
+                      const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
+                      return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="field"><span className="miniauto">No caliper-count parameter for {spec.label} — calipers are auto-generated.</span></div>
-          ))}
+          )}
 
           {/* Boundary Parameters */}
           {shape.drawn && (
@@ -881,15 +942,6 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
             </div>
           )}
 
-          {/* Generate Shape */}
-          {shape.drawn && (
-            <button className={'genbtn' + (shape.generated ? ' re' : '') + (overlapErr || axisErr ? ' dis' : '')}
-              disabled={!!(overlapErr || axisErr)}
-              onClick={() => { if (!overlapErr && !axisErr) set({ generated: true }); }}>
-              {shape.generated ? '↻ Regenerate shape trace' : '✦ Generate Shape'}
-            </button>
-          )}
-          {shape.generated && <div className="okline" style={{ justifyContent: 'center', marginTop: 8 }}>✓ Shape trace generated on canvas</div>}
         </div>
       )}
     </div>
@@ -1134,7 +1186,7 @@ function seedEdgeShapes() {
   quad.units = quad.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(250, 190, 190, 120)[i] }));
   return [
     mk('circle', 'Circle_1', { cx: 250, cy: 190, r: 90 }),
-    mk('line', 'Line_1', { sx: 150, sy: 120, ex: 360, ey: 250, angle: 32 }),
+    mk('line', 'Line_1', { cx: 250, cy: 130, w: 210, h: 46, angle: 20 }),
     mk('ellipse', 'Ellipse_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 }, { mode: 'segmentation', classMask: 'm1' }),
     quad,
   ];
@@ -1144,6 +1196,7 @@ function seedDims() { return []; }
 
 // One read-only-identity, editable-params shape card (Edge side)
 function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
+  const [caliperOpen, setCaliperOpen] = useState(false);
   const spec = SHAPES[shape.type];
   const set = (patch) => onChange({ ...shape, ...patch });
   const perUnit = spec.perUnit;
@@ -1199,24 +1252,25 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
             </div>
           </div>
 
-          {/* Editable caliper params */}
-          {spec.caliperParams.length > 0 ? (
-            <div className="field">
-              <div className="block-t">Caliper Parameters{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''} <span className="ln" /></div>
-              <div className="row2">
-                {spec.caliperParams.map((k) => {
-                  const meta = CALIPER_PARAM_META[k];
-                  const usePer = perUnit && perUnit.perCaliper;
-                  const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
-                  const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
-                  return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
-                })}
+          {/* Editable caliper params — under a "Configure Calipers" link */}
+          <div className="field">
+            <button className="configlink" onClick={() => setCaliperOpen((v) => !v)}>
+              <span className="chev">{caliperOpen ? '▾' : '▸'}</span> Configure Calipers{perUnit && perUnit.perCaliper ? ` · ${perUnit.label} ${shape.selUnit + 1}` : ''}
+            </button>
+            {caliperOpen && (
+              <div className="config-body">
+                <div className="row2">
+                  {spec.caliperParams.map((k) => {
+                    const meta = CALIPER_PARAM_META[k];
+                    const usePer = perUnit && perUnit.perCaliper;
+                    const val = usePer ? curUnit.caliper[k] : shape.caliper[k];
+                    const onV = (v) => usePer ? unitPatch('caliper', { [k]: v }) : set({ caliper: { ...shape.caliper, [k]: v } });
+                    return <NumberField key={k} label={meta.label} unit={meta.unit} value={val} min={meta.min} max={meta.max} onChange={onV} />;
+                  })}
+                </div>
               </div>
-              {spec.caliperNote && <div className="hint">{spec.caliperNote}</div>}
-            </div>
-          ) : (
-            <div className="field"><span className="miniauto">No caliper-count parameter for {spec.label} — calipers auto-generated.</span></div>
-          )}
+            )}
+          </div>
 
           {/* Editable boundary params */}
           <div className="field">
