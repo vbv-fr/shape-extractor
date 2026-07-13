@@ -90,6 +90,11 @@
   .namewrap.dup{border-color:var(--red);}
   .nameprefix{display:flex;align-items:center;padding:0 8px;background:#f2f4f5;color:var(--muted);font-size:12px;font-weight:700;border-right:1px solid var(--line-d);white-space:nowrap;}
   .nameinput{flex:1;border:0;padding:7px 9px;font-size:12px;color:var(--ink);outline:none;background:#fff;min-width:0;}
+  .namewrap.sm{height:26px;}
+  .namewrap.sm .nameprefix{padding:0 6px;font-size:11px;}
+  .namewrap.sm .nameinput{padding:2px 6px;font-size:12px;width:60px;flex:0 1 70px;}
+  .sc-hdr .t .pencil{display:inline-flex;color:#9aa0a6;cursor:pointer;padding:2px;}
+  .sc-hdr .t .pencil:hover{color:var(--orange);}
   .hint{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.4;}
   .err{font-size:11px;color:var(--red);margin-top:5px;line-height:1.4;display:flex;gap:5px;}
   .okline{font-size:11px;color:var(--green-d);margin-top:5px;display:flex;gap:5px;align-items:center;font-weight:600;}
@@ -724,10 +729,14 @@ function ConfirmModal({ open, onKeep, onDiscard }) {
 function TrashIcon() {
   return (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></svg>);
 }
+function PencilIcon() {
+  return (<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>);
+}
 
 function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr, nameOptions, otherNames, onArmDraw, arming }) {
   const [confirm, setConfirm] = useState(null);
   const [caliperOpen, setCaliperOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
   const set = (patch) => onChange({ ...shape, ...patch });
   const hasWork = shape.drawn || shape.generated;
   const guard = (applyFn) => { if (hasWork) setConfirm(() => applyFn); else applyFn(); };
@@ -788,11 +797,29 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
     <div className={'shapecard' + (selected ? ' sel' : '')}>
       <ConfirmModal open={!!confirm} onKeep={() => setConfirm(null)} onDiscard={() => { confirm(); setConfirm(null); }} />
       <div className="sc-hdr" onClick={onSelect}>
-        <div className="t"><span className="chip num">{idx + 1}</span>{shape.name || spec.label}</div>
+        <div className="t">
+          <span className="chip num">{idx + 1}</span>
+          {editingName ? (
+            <span className={'namewrap sm' + (dupName ? ' dup' : '')} onClick={(e) => e.stopPropagation()}>
+              <span className="nameprefix">{spec.prefix}_</span>
+              <input className="nameinput" autoFocus type="text" value={nameSuffix} placeholder="1"
+                onChange={(e) => set({ name: spec.prefix + '_' + e.target.value.replace(/\s+/g, '') })}
+                onBlur={() => setEditingName(false)}
+                onKeyDown={(e) => { if (e.key === 'Enter') setEditingName(false); }} />
+            </span>
+          ) : (
+            <span>{shape.name || spec.label}</span>
+          )}
+          {selected && !editingName && (
+            <span className="pencil" title="Rename" onClick={(e) => { e.stopPropagation(); setEditingName(true); }}><PencilIcon /></span>
+          )}
+        </div>
         <div className="tools"><span className="del" title="Delete shape" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TrashIcon /></span></div>
       </div>
       {selected && (
         <div className="sc-body">
+          {dupName && <div className="err" style={{ marginBottom: 10 }}>⚠ A shape named “{shape.name}” already exists in this capture. Rename it (pencil icon above).</div>}
+
           {/* Shape type */}
           <div className="field">
             <span className="lbl">Shape</span>
@@ -800,19 +827,6 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
               <option value="">Select shape…</option>
               {SHAPE_ORDER.map((k) => <option key={k} value={k}>{SHAPES[k].label}</option>)}
             </select>
-          </div>
-
-          {/* Shape name — editable text field, prefixed with the shape type */}
-          <div className="field">
-            <span className="lbl">Shape Name</span>
-            <div className={'namewrap' + (dupName ? ' dup' : '')}>
-              <span className="nameprefix">{spec.prefix}_</span>
-              <input className="nameinput" type="text" value={nameSuffix} placeholder="1"
-                onChange={(e) => set({ name: spec.prefix + '_' + e.target.value.replace(/\s+/g, '') })} />
-            </div>
-            {dupName
-              ? <div className="err">⚠ A shape named “{shape.name}” already exists in this capture. Names must be unique.</div>
-              : <div className="hint">Editable · prefixed with the shape type · unique within the capture.</div>}
           </div>
 
           {/* Mode */}
@@ -1141,20 +1155,25 @@ const SHAPE_FEATURES = {
   peak:     { points: ['Peak coordinate'], lines: [], closed: false },
 };
 // Type config: kind of feature consumed, whether a 2nd feature is needed, whether GT applies, default unit, extra controls.
+// kind = which sub-feature the type consumes (point/line/none); filter = which shapes qualify.
+// Peak Search is never a dimensioning feature. Angle → lines, Distance → points,
+// Length → any single shape (except peak), Area/Convexity/ContourContinuity → closed shapes only.
 const DIM_TYPE_CFG = {
-  1: { name: 'Angle', kind: 'line', two: true, gt: true, unit: '°' },
-  2: { name: 'Distance', kind: 'point', two: true, gt: true, unit: 'mm', axis: true },
-  3: { name: 'Area', kind: 'shape', two: false, gt: true, unit: 'mm²' },
-  4: { name: 'Length', kind: 'line', two: false, gt: true, unit: 'mm', piecewise: true },
-  5: { name: 'Convexity', kind: 'shape', two: false, gt: false, unit: '' },
-  6: { name: 'ContourContinuity', kind: 'shape', two: false, gt: false, unit: '' },
+  1: { name: 'Angle', kind: 'line', two: true, gt: true, unit: '°', filter: 'line' },
+  2: { name: 'Distance', kind: 'point', two: true, gt: true, unit: 'mm', axis: true, filter: 'any' },
+  3: { name: 'Area', kind: 'shape', two: false, gt: true, unit: 'mm²', filter: 'closed' },
+  4: { name: 'Length', kind: 'shape', two: false, gt: true, unit: 'mm', piecewise: true, filter: 'any' },
+  5: { name: 'Convexity', kind: 'shape', two: false, gt: false, unit: '', filter: 'closed' },
+  6: { name: 'ContourContinuity', kind: 'shape', two: false, gt: false, unit: '', filter: 'closed' },
 };
 const DIM_TYPE_OPTS = Object.entries(DIM_TYPE_CFG).map(([v, c]) => ({ v: Number(v), n: c.name }));
 const kindList = (type) => { const k = DIM_TYPE_CFG[type].kind; return k === 'point' ? 'points' : k === 'line' ? 'lines' : null; };
 const shapeQualifies = (shape, type) => {
-  const cfg = DIM_TYPE_CFG[type];
-  if (cfg.kind === 'shape') return !!SHAPE_FEATURES[shape.type].closed;
-  return SHAPE_FEATURES[shape.type][kindList(type)].length > 0;
+  if (shape.type === 'peak') return false;                                  // peak is never a feature
+  const f = DIM_TYPE_CFG[type].filter;
+  if (f === 'closed') return !!SHAPE_FEATURES[shape.type].closed;
+  if (f === 'line') return SHAPE_FEATURES[shape.type].lines.length > 0;
+  return true;                                                              // 'any' (all non-peak)
 };
 const featuresOf = (shape, type) => { const k = kindList(type); return shape && k ? SHAPE_FEATURES[shape.type][k] : []; };
 function typeDefaults(type, shapes) {
@@ -1189,6 +1208,7 @@ function seedEdgeShapes() {
     mk('line', 'Line_1', { cx: 250, cy: 130, w: 210, h: 46, angle: 20 }),
     mk('ellipse', 'Ellipse_1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 }, { mode: 'segmentation', classMask: 'm1' }),
     quad,
+    mk('peak', 'Peak_1', { cx: 250, cy: 300, w: 130, h: 70, angle: 0 }),
   ];
 }
 // No dimensions are inherited from Vision — the operator authors them here.
