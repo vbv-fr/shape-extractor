@@ -233,7 +233,7 @@ const SHAPES = {
     coords: [['sx', 'Start X'], ['sy', 'Start Y'], ['ex', 'End X'], ['ey', 'End Y'], ['angle', 'Angle°']],
     boundary: { types: [...BOUNDARY_TYPES, 'Close to Mid'], polarity: true, threshold: true, window: true },
     extras: [], general: [], perUnit: null,
-    outputs: ['Start', 'End', 'Middle', 'Angle'],
+    outputs: ['Start', 'End', 'Middle', 'Angle', 'Length'],
   },
   ellipse: {
     label: 'Ellipse', prefix: 'Ellipse', drawKind: 'box', coordTitle: 'Box Coordinates',
@@ -254,7 +254,7 @@ const SHAPES = {
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: true },
     extras: [], general: [],
     perUnit: { kind: 'box', count: 4, label: 'Box', perCoords: true, perCaliper: true },
-    outputs: ['Start', 'End', 'Middle', 'Angle (per line)', 'Centre (per line)', 'Diagonals'],
+    outputs: ['Vertices', 'Middle (diagonal intersection)', 'Edge length', 'Diagonal length'],
   },
   parallel: {
     label: 'Parallel Line Search', prefix: 'ParallelLine', drawKind: 'box', coordTitle: 'Box Coordinates',
@@ -264,7 +264,7 @@ const SHAPES = {
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
     extras: [], general: [['maxAngleDiff', 'Max Angle Difference', 'degrees · angle difference allowed between the two lines']],
     perUnit: { kind: 'edge', count: 2, label: 'Edge', perCoords: false, perCaliper: false },
-    outputs: ['Start', 'End', 'Middle', 'Angle (per line)'],
+    outputs: ['Start (per line)', 'End (per line)', 'Middle (per line)', 'Angle (per line)', 'Length (per line)'],
   },
   edge: {
     label: 'Edge Search', prefix: 'EdgeSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
@@ -274,7 +274,7 @@ const SHAPES = {
     boundary: { types: [...BOUNDARY_TYPES, 'All'], polarity: true, threshold: true, window: true },
     extras: [['maxResults', 'Maximum Result Number', 'max number of edges to return']],
     general: [], perUnit: null,
-    outputs: ['Start', 'End', 'Middle', 'Angle (per line)'],
+    outputs: ['Start (per line)', 'End (per line)', 'Middle (per line)', 'Angle (per line)', 'Length (per line)'],
   },
   peak: {
     label: 'Peak Search', prefix: 'PeakSearch', drawKind: 'box', coordTitle: 'Box Coordinates',
@@ -283,7 +283,7 @@ const SHAPES = {
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: null, polarity: true, threshold: true, window: true },
     extras: [], general: [], perUnit: null, peak: true,
-    outputs: ['Coordinate of the peak point'],
+    outputs: ['Peak coordinate'],
   },
 };
 const SHAPE_ORDER = ['circle', 'line', 'ellipse', 'quad', 'parallel', 'edge', 'peak'];
@@ -1036,7 +1036,6 @@ function VisionConfig({ toast }) {
                 </div>
                 {typedShapes.map((s, i) => {
                   const spec = SHAPES[s.type];
-                  const errPct = (0.4 + wob(i + 2, 0.9) + 0.9).toFixed(1);
                   return (
                     <div className="outcard" key={s.id}>
                       <div className="oh"><span className="chip num" style={{ width: 19, height: 19, borderRadius: '50%', background: 'var(--ink)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>{i + 1}</span>{s.name || spec.label}</div>
@@ -1044,7 +1043,7 @@ function VisionConfig({ toast }) {
                         {spec.outputs.map((o) => (
                           <label className="outrow" key={o}><input type="checkbox" checked disabled readOnly /><span className="on">{o}</span></label>
                         ))}
-                        <label className="outrow errrow"><input type="checkbox" checked disabled readOnly /><span className="on">Error %</span><span className="emv">≈ {errPct}%</span></label>
+                        <label className="outrow errrow"><input type="checkbox" checked disabled readOnly /><span className="on">Error %</span></label>
                       </div>
                     </div>
                   );
@@ -1083,11 +1082,11 @@ const SHAPE_FEATURES = {
   circle:   { points: ['Centre'], lines: [], closed: true },
   line:     { points: ['Start', 'End', 'Middle'], lines: ['Whole line'], closed: false },
   ellipse:  { points: ['Centre', 'Focus 1', 'Focus 2'], lines: ['Major axis', 'Minor axis'], closed: true },
-  quad:     { points: perLine('Edge', 4, ['Start', 'End', 'Middle', 'Centre']).concat(['Centre']),
+  quad:     { points: ['Vertex 1', 'Vertex 2', 'Vertex 3', 'Vertex 4', 'Middle (diagonal intersection)'],
               lines: ['Edge 1', 'Edge 2', 'Edge 3', 'Edge 4', 'Diagonal 1', 'Diagonal 2'], closed: true },
   parallel: { points: perLine('Line', 2, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2'], closed: false },
   edge:     { points: perLine('Line', 3, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2', 'Line 3'], closed: false },
-  peak:     { points: ['Peak point'], lines: [], closed: false },
+  peak:     { points: ['Peak coordinate'], lines: [], closed: false },
 };
 // Type config: kind of feature consumed, whether a 2nd feature is needed, whether GT applies, default unit, extra controls.
 const DIM_TYPE_CFG = {
