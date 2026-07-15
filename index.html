@@ -216,9 +216,10 @@
   .linkback:hover{text-decoration:underline;}
   .dimedit-split{flex:1;display:flex;min-height:0;}
   .dimedit-form{width:400px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--line);padding:14px;}
-  .colorwrap{display:flex;align-items:center;gap:8px;border:1px solid var(--line-d);border-radius:6px;padding:3px 8px;}
-  .colorwrap input[type=color]{width:26px;height:22px;border:0;background:transparent;padding:0;cursor:pointer;}
-  .colorwrap span{font-size:11px;color:var(--muted);font-family:monospace;}
+  .colorwrap{display:flex;align-items:center;gap:8px;border:1px solid var(--line-d);border-radius:6px;padding:2px 6px;}
+  .colorwrap .swatch{width:16px;height:16px;border-radius:4px;border:1px solid #0002;flex-shrink:0;}
+  .colorwrap .sel.bare{border:0;padding:5px 2px;background:transparent;flex:1;}
+  .colorwrap .sel.bare:focus{outline:none;}
 
   .edge-stub{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted);padding:40px;text-align:center;}
   .edge-stub .big{font-size:20px;font-weight:700;color:var(--ink);}
@@ -1177,15 +1178,31 @@ const SHAPE_FEATURES = {
   edge:     { points: perLine('Line', 3, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2', 'Line 3'], closed: false },
   peak:     { points: ['Peak coordinate'], lines: [], closed: false },
 };
+// Shape-level scalar keys (the measurable outputs a shape emits; used by the Length dimension's sub-dropdown).
+const SHAPE_KEYS = {
+  circle:   ['Radius', 'Perimeter', 'Area', 'Circularity', 'Convexity', 'Contour Continuity'],
+  line:     ['Length', 'Angle'],
+  ellipse:  ['Major axis', 'Minor axis', 'Angle'],
+  quad:     ['Edge 1', 'Edge 2', 'Edge 3', 'Edge 4', 'Diagonal 1', 'Diagonal 2'],
+  parallel: ['Line 1', 'Line 2', 'Angle'],
+  edge:     ['Line 1', 'Angle 1'],
+  peak:     [],
+};
+// Inference line colour palette (dropdown, not a hex picker).
+const LINE_COLOURS = [
+  { name: 'Green', hex: '#56b733' }, { name: 'Red', hex: '#e0473a' }, { name: 'Blue', hex: '#2f6fed' },
+  { name: 'Orange', hex: '#e8542b' }, { name: 'Yellow', hex: '#f5c518' }, { name: 'Purple', hex: '#7c3aed' },
+  { name: 'Cyan', hex: '#17b3c4' }, { name: 'White', hex: '#ffffff' }, { name: 'Black', hex: '#111111' },
+];
 // Type config: kind of feature consumed, whether a 2nd feature is needed, whether GT applies, default unit, extra controls.
-// kind = which sub-feature the type consumes (point/line/none); filter = which shapes qualify.
+// kind = which sub-feature the type consumes: point / line / key (shape scalar output) / shape (whole shape, no sub-feature).
 // Peak Search is never a dimensioning feature. Angle → lines, Distance → points,
-// Length → any single shape (except peak), Area/Convexity/ContourContinuity → closed shapes only.
+// Length → a shape scalar key (radius/perimeter/…) on any non-peak shape, Area/Convexity/ContourContinuity → closed shapes only.
 const DIM_TYPE_CFG = {
   1: { name: 'Angle', kind: 'line', two: true, gt: true, unit: '°', filter: 'line' },
   2: { name: 'Distance', kind: 'point', two: true, gt: true, unit: 'mm', axis: true, filter: 'any' },
   3: { name: 'Area', kind: 'shape', two: false, gt: true, unit: 'mm²', filter: 'closed' },
-  4: { name: 'Length', kind: 'shape', two: false, gt: true, unit: 'mm', piecewise: true, filter: 'any' },
+  4: { name: 'Length', kind: 'key', two: false, gt: true, unit: 'mm', piecewise: true, filter: 'any' },
   5: { name: 'Convexity', kind: 'shape', two: false, gt: false, unit: '', filter: 'closed' },
   6: { name: 'ContourContinuity', kind: 'shape', two: false, gt: false, unit: '', filter: 'closed' },
 };
@@ -1198,7 +1215,12 @@ const shapeQualifies = (shape, type) => {
   if (f === 'line') return SHAPE_FEATURES[shape.type].lines.length > 0;
   return true;                                                              // 'any' (all non-peak)
 };
-const featuresOf = (shape, type) => { const k = kindList(type); return shape && k ? SHAPE_FEATURES[shape.type][k] : []; };
+const featuresOf = (shape, type) => {
+  if (!shape) return [];
+  if (DIM_TYPE_CFG[type].kind === 'key') return SHAPE_KEYS[shape.type] || [];
+  const k = kindList(type);
+  return k ? SHAPE_FEATURES[shape.type][k] : [];
+};
 function typeDefaults(type, shapes) {
   const cfg = DIM_TYPE_CFG[type];
   const valid = shapes.filter((s) => shapeQualifies(s, type));
@@ -1516,8 +1538,18 @@ function DimensionForm({ draft, setDraft, shapes }) {
       )}
       <div className="block-t" style={{ marginTop: 8 }}>Inference Line Colours <span className="ln" /></div>
       <div className="row2 field">
-        <div><span className="tinylab">OK colour</span><div className="colorwrap"><input type="color" value={draft.okColor} onChange={(e) => patch({ okColor: e.target.value })} /><span>{draft.okColor}</span></div></div>
-        <div><span className="tinylab">NG colour</span><div className="colorwrap"><input type="color" value={draft.ngColor} onChange={(e) => patch({ ngColor: e.target.value })} /><span>{draft.ngColor}</span></div></div>
+        <div><span className="tinylab">OK colour</span>
+          <div className="colorwrap"><span className="swatch" style={{ background: draft.okColor }} />
+            <select className="sel bare" value={draft.okColor} onChange={(e) => patch({ okColor: e.target.value })}>
+              {LINE_COLOURS.map((c) => <option key={c.hex} value={c.hex}>{c.name}</option>)}
+            </select></div>
+        </div>
+        <div><span className="tinylab">NG colour</span>
+          <div className="colorwrap"><span className="swatch" style={{ background: draft.ngColor }} />
+            <select className="sel bare" value={draft.ngColor} onChange={(e) => patch({ ngColor: e.target.value })}>
+              {LINE_COLOURS.map((c) => <option key={c.hex} value={c.hex}>{c.name}</option>)}
+            </select></div>
+        </div>
       </div>
       <div className="hint">At inference, this dimension is drawn as a single line labelled “{draft.name}”, in the OK colour when in-spec and the NG colour when out of tolerance.</div>
     </div>
