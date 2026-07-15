@@ -196,6 +196,29 @@
   .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:16px;line-height:1.45;}
   .banner.warn{background:#fdECe8;color:#b8341f;border:1px solid #f3c4b8;}
   .banner.ok{background:#eef7ea;color:var(--green-d);border:1px solid #cdeabf;}
+  .emc-tabs{display:flex;gap:2px;padding:0 16px;background:#fff;border-bottom:1px solid var(--line);flex-shrink:0;}
+  .emc-tabs button{border:0;background:transparent;padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;}
+  .emc-tabs button.on{color:var(--ink);border-bottom-color:var(--orange);}
+  .dimlist{flex:1;overflow-y:auto;padding:16px 18px;background:#fff;}
+  .dimlist-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  .dimlist-hd .t{font-size:14px;font-weight:700;}
+  .dimtable{width:100%;border-collapse:collapse;font-size:12px;}
+  .dimtable th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);padding:7px 10px;border-bottom:1px solid var(--line);}
+  .dimtable td{padding:9px 10px;border-bottom:1px solid #f1f2f3;color:var(--ink);}
+  .dimtable td .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle;}
+  .dimtable tr:hover td{background:#fafbfc;}
+  .dimtable .acts{display:flex;gap:12px;color:var(--muted);}
+  .dimtable .acts span{cursor:pointer;display:inline-flex;}
+  .dimtable .acts span:hover{color:var(--orange);}
+  .dimedit{flex:1;display:flex;flex-direction:column;min-height:0;background:#fff;}
+  .dimedit-hd{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px;}
+  .linkback{border:0;background:transparent;color:var(--blue);font-weight:600;font-size:12px;cursor:pointer;}
+  .linkback:hover{text-decoration:underline;}
+  .dimedit-split{flex:1;display:flex;min-height:0;}
+  .dimedit-form{width:400px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--line);padding:14px;}
+  .colorwrap{display:flex;align-items:center;gap:8px;border:1px solid var(--line-d);border-radius:6px;padding:3px 8px;}
+  .colorwrap input[type=color]{width:26px;height:22px;border:0;background:transparent;padding:0;cursor:pointer;}
+  .colorwrap span{font-size:11px;color:var(--muted);font-family:monospace;}
 
   .edge-stub{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;color:var(--muted);padding:40px;text-align:center;}
   .edge-stub .big{font-size:20px;font-weight:700;color:var(--ink);}
@@ -276,7 +299,7 @@ const SHAPES = {
     coords: [['cx', 'Centre X'], ['cy', 'Centre Y'], ['w', 'Width'], ['h', 'Height'], ['angle', 'Angle°']],
     boundary: { types: BOUNDARY_TYPES, polarity: true, threshold: true, window: false },
     extras: [], general: [['maxAngleDiff', 'Max Angle Difference', 'degrees · angle difference allowed between the two lines']],
-    perUnit: { kind: 'edge', count: 2, label: 'Edge', perCoords: false, perCaliper: false },
+    perUnit: null,   // combined setup for both lines (not per-line)
     outputs: ['Start (per line)', 'End (per line)', 'Middle (per line)', 'Angle (per line)', 'Length (per line)'],
   },
   edge: {
@@ -1192,6 +1215,7 @@ function makeDim(shapes, n) {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
     type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre', piecewise: false,
     operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
+    okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
   };
 }
@@ -1342,207 +1366,286 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
   );
 }
 
-function EdgeDimensioning({ dims, setDims, shapes, onDirty, onAdd, onRemove }) {
-  const patch = (i, p) => { setDims((prev) => prev.map((d, idx) => idx === i ? { ...d, ...p } : d)); onDirty(); };
-  const changeType = (i, type) => patch(i, { type, ...typeDefaults(type, shapes) });
-  const changeShape = (i, dim, which, id) => {
-    const sel = featuresOf(shapes.find((s) => s.id === id), dim.type)[0] || '';
-    patch(i, which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
-  };
+/* master-image backdrop (shared) */
+function PartBackdrop() {
   return (
-    <div className="emc-dim">
-      {dims.length === 0
-        ? <div className="banner warn">⚠ No dimensioning configured for this capture. A Shape Extractor capture with no dimensioning <b>cannot be deployed</b> — add at least one dimension before deploying.</div>
-        : <div className="banner ok">✓ {dims.length} dimension{dims.length > 1 ? 's' : ''} created. Dimensions are computed between this capture's Shape Extractor shapes.</div>}
+    <g>
+      <defs>
+        <linearGradient id="metal2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3a4149" /><stop offset=".5" stopColor="#2a3038" /><stop offset="1" stopColor="#1c2127" /></linearGradient>
+        <radialGradient id="sheen2" cx=".4" cy=".3" r=".9"><stop offset="0" stopColor="#5a6472" stopOpacity=".5" /><stop offset="1" stopColor="#000" stopOpacity="0" /></radialGradient>
+      </defs>
+      <rect width="500" height="380" fill="url(#metal2)" /><rect width="500" height="380" fill="url(#sheen2)" />
+      <rect x="120" y="70" width="260" height="240" rx="14" fill="#464e57" stroke="#20262c" strokeWidth="2" />
+      <circle cx="250" cy="190" r="70" fill="#363d45" stroke="#12161a" strokeWidth="2" />
+      <circle cx="250" cy="190" r="46" fill="#2b3138" stroke="#12161a" strokeWidth="1.5" />
+      {[[150,100],[350,100],[150,280],[350,280]].map((p,i)=>(<circle key={i} cx={p[0]} cy={p[1]} r="9" fill="#22282e" stroke="#0d1114" strokeWidth="1.5" />))}
+    </g>
+  );
+}
+// representative on-image point for a shape's feature (for the dimension preview)
+function featPoint(shape, selector) {
+  const c = shape.coords || {}, t = shape.type;
+  const cx = c.cx ?? 250, cy = c.cy ?? 190;
+  if (t === 'circle') return selector === 'Edge point' ? [cx + (c.r || 60), cy] : [cx, cy];
+  if (t === 'peak') return [cx, cy];
+  const w = c.w ?? 140, h = c.h ?? 90, a = (c.angle || 0) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const loc = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  if (t === 'line') return selector === 'Start' ? loc(-w / 2, 0) : selector === 'End' ? loc(w / 2, 0) : [cx, cy];
+  if (t === 'ellipse') return selector === 'Focus 1' ? loc(w / 4, 0) : selector === 'Focus 2' ? loc(-w / 4, 0) : [cx, cy];
+  if (t === 'quad') {
+    const cor = boxCorners(cx, cy, w, h, c.angle || 0);
+    let m = /Vertex (\d)/.exec(selector); if (m) return cor[(+m[1] - 1) % 4];
+    m = /Edge (\d)/.exec(selector); if (m) { const i = (+m[1] - 1) % 4, p = cor[i], q = cor[(i + 1) % 4]; return [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]; }
+    return [cx, cy];
+  }
+  if (t === 'parallel' || t === 'edge') {
+    const m = /Line (\d) · (\w+)/.exec(selector), off = h / 3;
+    if (m) { const yo = +m[1] === 1 ? -off : off, dx = m[2] === 'Start' ? -w / 2 : m[2] === 'End' ? w / 2 : 0; return loc(dx, yo); }
+    return [cx, cy];
+  }
+  return [cx, cy];
+}
+function shapeOutline(s, key) {
+  if (!s) return null;
+  const c = s.coords || {};
+  if (s.type === 'circle') return <circle key={key} cx={c.cx} cy={c.cy} r={c.r} fill="none" stroke="#8b93a1" strokeWidth="1.3" strokeDasharray="3 3" />;
+  const cor = boxCorners(c.cx ?? 250, c.cy ?? 190, c.w ?? 140, c.h ?? 90, c.angle || 0);
+  return <polygon key={key} points={cor.map((p) => p.join(',')).join(' ')} fill="none" stroke="#8b93a1" strokeWidth="1.3" strokeDasharray="3 3" />;
+}
 
-      <button className="addbtn" style={{ marginBottom: 16 }} onClick={onAdd}>＋ Add Dimension</button>
-
-      {dims.map((dim, index) => {
-        const cfg = DIM_TYPE_CFG[dim.type];
-        const validShapes = shapes.filter((s) => shapeQualifies(s, dim.type));
-        const aFeats = featuresOf(shapes.find((s) => s.id === dim.shapeOneId), dim.type);
-        const bFeats = featuresOf(shapes.find((s) => s.id === dim.shapeTwoId), dim.type);
-        const shapeSelect = (val, onCh) => (
-          <select className="sel" value={val} onChange={onCh}>
-            {validShapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        );
-        return (
-          <div className="dimcard" key={dim.id}>
-            <div className="dh">
-              <span className="chip num">{index + 1}</span>
-              <span style={{ flex: 1 }}>{dim.name || `Dimension ${index + 1}`}</span>
-              <span className="del" title="Delete dimension" style={{ cursor: 'pointer' }} onClick={() => onRemove(dim.id)}><TrashIcon /></span>
-            </div>
-
-            {/* Name */}
-            <div className="field">
-              <span className="tinylab">Dimension Name</span>
-              <input className="inp" type="text" value={dim.name} onChange={(e) => patch(index, { name: e.target.value })} />
-            </div>
-
-            {/* Type + type-dependent dropdowns */}
-            <div className="row3" style={{ marginBottom: 12 }}>
-              <div><span className="tinylab">Type</span>
-                <select className="sel" value={dim.type} onChange={(e) => changeType(index, Number(e.target.value))}>
-                  {DIM_TYPE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
-                </select>
-              </div>
-              {cfg.axis && (
-                <div><span className="tinylab">Distance Axis</span>
-                  <select className="sel" value={dim.distanceAxis} onChange={(e) => patch(index, { distanceAxis: e.target.value })}>
-                    {DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              )}
-              {cfg.axis && dim.distanceAxis === 'euclidean' && (
-                <div><span className="tinylab">Euclidean Mode</span>
-                  <select className="sel" value={dim.euclideanMode} onChange={(e) => patch(index, { euclideanMode: e.target.value })}>
-                    {EUC_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              )}
-              {cfg.piecewise && (
-                <div><span className="tinylab">Piecewise</span>
-                  <select className="sel" value={dim.piecewise ? 'Yes' : 'No'} onChange={(e) => patch(index, { piecewise: e.target.value === 'Yes' })}>
-                    <option>No</option><option>Yes</option>
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {/* Feature A (single-feature types show shape only) */}
-            <div className="field">
-              <span className="tinylab">{cfg.two ? 'Feature A' : 'Feature'}</span>
-              <div className="feat">
-                {shapeSelect(dim.shapeOneId, (e) => changeShape(index, dim, 'one', e.target.value))}
-                {cfg.kind !== 'shape' && (
-                  <select className="sel" value={dim.shapeOneSelector} onChange={(e) => patch(index, { shapeOneSelector: e.target.value })}>
-                    {aFeats.map((f) => <option key={f}>{f}</option>)}
-                  </select>
-                )}
-              </div>
-            </div>
-
-            {/* Feature B (two-feature types only) */}
-            {cfg.two && (
-              <div className="field">
-                <span className="tinylab">Feature B</span>
-                <div className="feat">
-                  {shapeSelect(dim.shapeTwoId, (e) => changeShape(index, dim, 'two', e.target.value))}
-                  <select className="sel" value={dim.shapeTwoSelector} onChange={(e) => patch(index, { shapeTwoSelector: e.target.value })}>
-                    {bFeats.map((f) => <option key={f}>{f}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
-
-            {/* Ground Truth (editable) */}
-            {cfg.gt && (
-              <>
-                <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
-                <div className="gtgrid">
-                  <div><span className="tinylab">Operator</span>
-                    <select className="sel" value={dim.operator} onChange={(e) => patch(index, { operator: Number(e.target.value) })}>
-                      <option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option>
-                    </select>
-                  </div>
-                  <div><span className="tinylab">Value</span>
-                    <input className="inp" type="number" min="0" value={dim.targetValue} onChange={(e) => patch(index, { targetValue: Math.max(0, Number(e.target.value)) })} /></div>
-                  <div><span className="tinylab">Tolerance</span>
-                    <input className="inp" type="number" min="0" value={dim.tolerance} onChange={(e) => patch(index, { tolerance: Math.max(0, Number(e.target.value)) })} /></div>
-                  <div><span className="tinylab">Unit</span>
-                    <select className="sel" value={dim.unit} onChange={(e) => patch(index, { unit: e.target.value })}>
-                      {UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}
-                    </select>
-                  </div>
-                </div>
-                {cfg.kind !== 'line' || dim.type !== 1 ? (
-                  <div className="field" style={{ marginTop: 10 }}>
-                    <span className="tinylab">Ratio (pixel to mm)</span>
-                    <input className="inp" type="number" min="0" step="0.001" value={dim.ratio} onChange={(e) => patch(index, { ratio: Math.max(0, Number(e.target.value)) })} />
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-        );
-      })}
+// canvas preview of the dimension being drawn on the master image
+function DimensionCanvas({ dim, shapes }) {
+  const cfg = DIM_TYPE_CFG[dim.type];
+  const sA = shapes.find((s) => s.id === dim.shapeOneId);
+  const sB = cfg.two ? shapes.find((s) => s.id === dim.shapeTwoId) : null;
+  const col = dim.okColor || '#56b733';
+  const pA = sA ? featPoint(sA, dim.shapeOneSelector) : null;
+  const pB = sB ? featPoint(sB, dim.shapeTwoSelector) : null;
+  const mid = pA && pB ? [(pA[0] + pB[0]) / 2, (pA[1] + pB[1]) / 2] : pA;
+  const label = dim.name || 'Dimension';
+  return (
+    <div className="canvas-wrap">
+      <div className="frame">
+        <span className="flabel">MASTER IMAGE</span>
+        <svg width="500" height="380" viewBox="0 0 500 380">
+          <PartBackdrop />
+          {shapeOutline(sA, 'a')}{shapeOutline(sB, 'b')}
+          {pA && pB && <line x1={pA[0]} y1={pA[1]} x2={pB[0]} y2={pB[1]} stroke={col} strokeWidth="2.4" />}
+          {pA && <circle cx={pA[0]} cy={pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
+          {pB && <circle cx={pB[0]} cy={pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
+          {mid && (
+            <g>
+              <rect x={mid[0] - label.length * 3.6 - 6} y={mid[1] - 22} width={label.length * 7.2 + 12} height="17" rx="4" fill={col} />
+              <text x={mid[0]} y={mid[1] - 10} fill="#fff" fontSize="11" fontWeight="700" textAnchor="middle">{label}</text>
+            </g>
+          )}
+          {!cfg.two && pA && <text x={pA[0]} y={pA[1] + 18} fill={col} fontSize="10" fontWeight="700" textAnchor="middle">{cfg.name}</text>}
+        </svg>
+      </div>
     </div>
   );
 }
 
-function EdgeEMC({ toast }) {
+// single-dimension config form (used in the Add/Edit sub-page)
+function DimensionForm({ draft, setDraft, shapes }) {
+  const cfg = DIM_TYPE_CFG[draft.type];
+  const patch = (p) => setDraft({ ...draft, ...p });
+  const changeType = (type) => patch({ type, ...typeDefaults(type, shapes) });
+  const changeShape = (which, id) => {
+    const sel = featuresOf(shapes.find((s) => s.id === id), draft.type)[0] || '';
+    patch(which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
+  };
+  const validShapes = shapes.filter((s) => shapeQualifies(s, draft.type));
+  const aFeats = featuresOf(shapes.find((s) => s.id === draft.shapeOneId), draft.type);
+  const bFeats = featuresOf(shapes.find((s) => s.id === draft.shapeTwoId), draft.type);
+  const shapeSelect = (val, onCh) => (
+    <select className="sel" value={val} onChange={onCh}>{validShapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+  );
+  return (
+    <div style={{ padding: '4px 2px' }}>
+      <div className="field">
+        <span className="lbl">Dimension Name</span>
+        <input className="inp" type="text" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
+      </div>
+      <div className="row3 field">
+        <div><span className="tinylab">Type</span>
+          <select className="sel" value={draft.type} onChange={(e) => changeType(Number(e.target.value))}>
+            {DIM_TYPE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
+          </select>
+        </div>
+        {cfg.axis && <div><span className="tinylab">Distance Axis</span>
+          <select className="sel" value={draft.distanceAxis} onChange={(e) => patch({ distanceAxis: e.target.value })}>{DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
+        {cfg.axis && draft.distanceAxis === 'euclidean' && <div><span className="tinylab">Euclidean Mode</span>
+          <select className="sel" value={draft.euclideanMode} onChange={(e) => patch({ euclideanMode: e.target.value })}>{EUC_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
+        {cfg.piecewise && <div><span className="tinylab">Piecewise</span>
+          <select className="sel" value={draft.piecewise ? 'Yes' : 'No'} onChange={(e) => patch({ piecewise: e.target.value === 'Yes' })}><option>No</option><option>Yes</option></select></div>}
+      </div>
+      <div className="field">
+        <span className="tinylab">{cfg.two ? 'Feature A' : 'Feature'}</span>
+        <div className="feat">
+          {shapeSelect(draft.shapeOneId, (e) => changeShape('one', e.target.value))}
+          {cfg.kind !== 'shape' && <select className="sel" value={draft.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{aFeats.map((f) => <option key={f}>{f}</option>)}</select>}
+        </div>
+      </div>
+      {cfg.two && (
+        <div className="field">
+          <span className="tinylab">Feature B</span>
+          <div className="feat">
+            {shapeSelect(draft.shapeTwoId, (e) => changeShape('two', e.target.value))}
+            <select className="sel" value={draft.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{bFeats.map((f) => <option key={f}>{f}</option>)}</select>
+          </div>
+        </div>
+      )}
+      {cfg.gt && (
+        <>
+          <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
+          <div className="gtgrid">
+            <div><span className="tinylab">Operator</span>
+              <select className="sel" value={draft.operator} onChange={(e) => patch({ operator: Number(e.target.value) })}><option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option></select></div>
+            <div><span className="tinylab">Value</span><input className="inp" type="number" min="0" value={draft.targetValue} onChange={(e) => patch({ targetValue: Math.max(0, Number(e.target.value)) })} /></div>
+            <div><span className="tinylab">Tolerance</span><input className="inp" type="number" min="0" value={draft.tolerance} onChange={(e) => patch({ tolerance: Math.max(0, Number(e.target.value)) })} /></div>
+            <div><span className="tinylab">Unit</span><select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select></div>
+          </div>
+          {draft.type !== 1 && (
+            <div className="field" style={{ marginTop: 10 }}>
+              <span className="tinylab">Ratio (pixel to mm)</span>
+              <input className="inp" type="number" min="0" step="0.001" value={draft.ratio} onChange={(e) => patch({ ratio: Math.max(0, Number(e.target.value)) })} />
+            </div>
+          )}
+        </>
+      )}
+      <div className="block-t" style={{ marginTop: 8 }}>Inference Line Colours <span className="ln" /></div>
+      <div className="row2 field">
+        <div><span className="tinylab">OK colour</span><div className="colorwrap"><input type="color" value={draft.okColor} onChange={(e) => patch({ okColor: e.target.value })} /><span>{draft.okColor}</span></div></div>
+        <div><span className="tinylab">NG colour</span><div className="colorwrap"><input type="color" value={draft.ngColor} onChange={(e) => patch({ ngColor: e.target.value })} /><span>{draft.ngColor}</span></div></div>
+      </div>
+      <div className="hint">At inference, this dimension is drawn as a single line labelled “{draft.name}”, in the OK colour when in-spec and the NG colour when out of tolerance.</div>
+    </div>
+  );
+}
+
+// Dimension Configuration: table list ↔ add/edit sub-page
+function DimensionConfig({ dims, setDims, shapes }) {
+  const [view, setView] = useState('list');
+  const [draft, setDraft] = useState(null);
+  const [editId, setEditId] = useState(null);
+  const shapeName = (id) => (shapes.find((s) => s.id === id) || {}).name || '';
+  const startAdd = () => { setDraft(makeDim(shapes, dims.length + 1)); setEditId(null); setView('edit'); };
+  const startEdit = (d) => { setDraft(clone(d)); setEditId(d.id); setView('edit'); };
+  const saveDraft = () => {
+    setDims((p) => editId ? p.map((d) => d.id === editId ? draft : d) : [...p, draft]);
+    setView('list'); setDraft(null); setEditId(null);
+  };
+  const remove = (id) => setDims((p) => p.filter((d) => d.id !== id));
+
+  if (view === 'edit' && draft) {
+    return (
+      <div className="dimedit">
+        <div className="dimedit-hd">
+          <button className="linkback" onClick={() => setView('list')}>← Dimension Configuration</button>
+          <span>{editId ? 'Edit' : 'Add'} Dimension</span>
+        </div>
+        <div className="dimedit-split">
+          <div className="dimedit-form"><DimensionForm draft={draft} setDraft={setDraft} shapes={shapes} /></div>
+          <div className="emc-canvas">
+            <div className="canvas-tools"><div className="ct">◳ Fit</div><div className="ct" style={{ color: 'var(--orange)' }}>▧ {draft.name}</div></div>
+            <DimensionCanvas dim={draft} shapes={shapes} />
+          </div>
+        </div>
+        <div className="emc-foot">
+          <button className="btn btn-ghost sm" onClick={() => setView('list')}>Cancel</button>
+          <button className="btn btn-primary sm" onClick={saveDraft}>Save Dimension</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="dimlist">
+      {dims.length === 0
+        ? <div className="banner warn">⚠ No dimensions configured for this capture. A Shape Extractor capture with no dimensions <b>cannot be deployed</b> — add at least one before deploying.</div>
+        : <div className="banner ok">✓ {dims.length} dimension{dims.length > 1 ? 's' : ''} configured for this capture.</div>}
+      <div className="dimlist-hd">
+        <div className="t">Dimensions</div>
+        <button className="btn btn-primary sm" onClick={startAdd}>＋ Add Dimension</button>
+      </div>
+      {dims.length > 0 && (
+        <table className="dimtable">
+          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th></th></tr></thead>
+          <tbody>
+            {dims.map((d, i) => {
+              const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
+              return (
+                <tr key={d.id}>
+                  <td>{i + 1}</td>
+                  <td><span className="dot" style={{ background: d.okColor }} />{d.name}</td>
+                  <td>{cfg.name}</td>
+                  <td>{shapeName(d.shapeOneId)}{cfg.kind !== 'shape' && d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
+                  <td>{cfg.two ? `${shapeName(d.shapeTwoId)}${d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}` : '—'}</td>
+                  <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
+                  <td className="acts">
+                    <span title="Edit" onClick={() => startEdit(d)}>✎</span>
+                    <span title="Delete" onClick={() => remove(d.id)}><TrashIcon /></span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function EdgeShell({ toast }) {
+  const [tab, setTab] = useState('emc');           // 'emc' | 'dim'
   const [shapes, setShapes] = useState(seedEdgeShapes);
   const [dims, setDims] = useState(seedDims);
   const [sel, setSel] = useState(() => shapes[0].id);
-  const [moduleSel, setModuleSel] = useState('she1');
   const [dirty, setDirty] = useState(false);
   const [reviewModal, setReviewModal] = useState(false);
   const initial = useRef(null);
-  useEffect(() => { initial.current = { shapes: clone(shapes), dims: clone(dims) }; }, []);
-  const markDirty = () => setDirty(true);
+  useEffect(() => { if (!initial.current) initial.current = clone(shapes); }, []);
 
-  const onSave = () => {
-    const wasShapeEdit = moduleSel === 'she1' && dirty;
-    initial.current = { shapes: clone(shapes), dims: clone(dims) };
-    setDirty(false);
-    if (moduleSel === 'she1') {
-      toast('Shape Extractor changes saved');
-      if (wasShapeEdit) setReviewModal(true);   // PRD: warn dimensioning may have changed
-    } else {
-      toast('Dimensioning changes saved');
-    }
-  };
-  const onReset = () => {
-    if (!initial.current) return;
-    setShapes(clone(initial.current.shapes));
-    setDims(clone(initial.current.dims));
-    setDirty(false);
-  };
-  const addDim = () => { setDims((p) => [...p, makeDim(shapes, p.length + 1)]); setDirty(true); };
-  const removeDim = (id) => { setDims((p) => p.filter((d) => d.id !== id)); setDirty(true); };
+  const onSave = () => { initial.current = clone(shapes); setDirty(false); toast('Shape Extractor changes saved'); setReviewModal(true); };
+  const onReset = () => { if (initial.current) { setShapes(clone(initial.current)); setDirty(false); } };
 
   return (
     <div className="emc">
-      <div className="emc-crumbs">Instances <span>›</span> Inferencing Customization <span>›</span> <b>Edit Module Configurations</b></div>
+      <div className="emc-crumbs">Instances <span>›</span> Inferencing Customization <span>›</span> <b>{tab === 'emc' ? 'Edit Module Configurations' : 'Dimension Configuration'}</b></div>
       <div className="emc-selectors">
         <div className="fld grow">
           <label>Instance <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(Instance · Project · Plant)</span></label>
           <select className="sel"><option>Line-A Cell 3 · GasketInspect · Plant Pune</option></select>
         </div>
-        <div className="fld">
-          <label>Variant | Capture</label>
-          <select className="sel"><option>Variant A | Cam 1</option></select>
-        </div>
-        <div className="fld">
-          <label>Module</label>
-          <select className="sel" value={moduleSel} onChange={(e) => setModuleSel(e.target.value)}>
-            <option value="she1">SHE_1 · Shape Extractor</option>
-            <option value="dim">Dimensioning from Shape Extractor</option>
-          </select>
-        </div>
+        <div className="fld"><label>Variant | Capture</label><select className="sel"><option>Variant A | Cam 1</option></select></div>
+        {tab === 'emc' && <div className="fld"><label>Module</label><select className="sel"><option>SHE_1 · Shape Extractor</option></select></div>}
+      </div>
+      <div className="emc-tabs">
+        <button className={tab === 'emc' ? 'on' : ''} onClick={() => setTab('emc')}>Edit Module Configurations</button>
+        <button className={tab === 'dim' ? 'on' : ''} onClick={() => setTab('dim')}>Dimension Configuration</button>
       </div>
 
       <div className="emc-body">
-        {moduleSel === 'she1'
-          ? <EdgeShapeEditor shapes={shapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={markDirty} />
-          : <EdgeDimensioning dims={dims} setDims={setDims} shapes={shapes} onDirty={markDirty} onAdd={addDim} onRemove={removeDim} />}
+        {tab === 'emc'
+          ? <EdgeShapeEditor shapes={shapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={() => setDirty(true)} />
+          : <DimensionConfig dims={dims} setDims={setDims} shapes={shapes} />}
       </div>
 
-      <div className="emc-foot">
-        <button className="btn btn-ghost sm" disabled={!dirty} onClick={onReset}>Reset</button>
-        <button className="btn btn-primary sm" disabled={!dirty} onClick={onSave}>Save</button>
-      </div>
+      {tab === 'emc' && (
+        <div className="emc-foot">
+          <button className="btn btn-ghost sm" disabled={!dirty} onClick={onReset}>Reset</button>
+          <button className="btn btn-primary sm" disabled={!dirty} onClick={onSave}>Save</button>
+        </div>
+      )}
 
       {reviewModal && (
         <div className="overlay" onClick={() => setReviewModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="mh">⚠ Review dimensioning before deploying</div>
-            <div className="mb">You changed a Shape Extractor module. The dimensioning computed from its shapes may have changed as a result. Please review the <b>“Dimensioning from Shape Extractor”</b> section before making any deployments.</div>
+            <div className="mh">⚠ Review dimensions before deploying</div>
+            <div className="mb">You changed a Shape Extractor module. The dimensions computed from its shapes may have changed as a result. Please review <b>Dimension Configuration</b> before making any deployments.</div>
             <div className="mf">
               <button className="btn btn-ghost" onClick={() => setReviewModal(false)}>Dismiss</button>
-              <button className="btn btn-primary" onClick={() => { setModuleSel('dim'); setReviewModal(false); }}>Review Dimensioning</button>
+              <button className="btn btn-primary" onClick={() => { setTab('dim'); setReviewModal(false); }}>Go to Dimension Configuration</button>
             </div>
           </div>
         </div>
@@ -1565,10 +1668,10 @@ function App() {
         </div>
         <div className="switch">
           <button className={view === 'vision' ? 'on' : ''} onClick={() => setView('vision')}><span className="pv">VISION</span> Module Configuration</button>
-          <button className={view === 'edge' ? 'on' : ''} onClick={() => setView('edge')}><span className="pv edge">EDGE</span> Edit Module Configurations</button>
+          <button className={view === 'edge' ? 'on' : ''} onClick={() => setView('edge')}><span className="pv edge">EDGE</span> Inferencing Customization</button>
         </div>
       </div>
-      {view === 'vision' ? <VisionConfig toast={showToast} /> : <EdgeEMC toast={showToast} />}
+      {view === 'vision' ? <VisionConfig toast={showToast} /> : <EdgeShell toast={showToast} />}
       {toast && <div className={'toast' + (toast.warn ? ' warn' : '')}>{toast.warn ? '⚠' : '✓'} {toast.msg}</div>}
     </div>
   );
