@@ -85,6 +85,7 @@
   .lbl .sub{font-weight:400;color:var(--muted);}
   .sel,.inp{width:100%;border:1px solid var(--line-d);border-radius:6px;padding:7px 9px;background:#fff;color:var(--ink);}
   .sel:focus,.inp:focus{outline:none;border-color:var(--orange);}
+  .inp:disabled,.sel:disabled{background:#f1f3f5;color:#9aa4b2;cursor:not-allowed;-webkit-text-fill-color:#9aa4b2;}
   .namewrap{display:flex;align-items:stretch;border:1px solid var(--line-d);border-radius:6px;overflow:hidden;}
   .namewrap:focus-within{border-color:var(--orange);}
   .namewrap.dup{border-color:var(--red);}
@@ -115,6 +116,7 @@
   .field{margin-bottom:12px;}
   .field:last-child{margin-bottom:0;}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+  .calrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
   .rowcta{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end;}
   .modetoggle{display:flex;border:1px solid var(--line-d);border-radius:7px;overflow:hidden;}
@@ -359,6 +361,29 @@ function defaultBoundary(spec) {
 function defaultCaliper(spec) { const o = {}; spec.caliperParams.forEach((k) => (o[k] = CALIPER_PARAM_META[k].def)); return o; }
 function defaultGeneral(spec) { const o = {}; spec.general.forEach(([k]) => (o[k] = k === 'maxAngleDiff' ? 5 : 0)); return o; }
 
+// Auto-derive caliper Number (end-to-end packed) + Height (spans the full box) from the drawn geometry.
+function deriveCaliper(shape) {
+  const spec = SHAPES[shape.type]; if (!spec) return shape.caliper || {};
+  const c = shape.coords || {}; const cal = { ...(shape.caliper || {}) };
+  const W = Math.max(2, cal.width || 10);
+  if (spec.drawKind === 'circle') {
+    const circ = 2 * Math.PI * (c.r || 70);
+    cal.number = Math.max(3, Math.min(80, Math.round(circ / W)));
+  } else if (spec.drawKind === 'box') {
+    if ('height' in cal) cal.height = Math.max(4, Math.round(c.h || 120)); // caliper height = full box cross-dimension
+    cal.number = Math.max(1, Math.min(120, Math.round((c.w || 190) / W))); // end-to-end packed
+  }
+  return cal;
+}
+function deriveUnitCaliper(unit) {
+  const cal = { ...(unit.caliper || {}) }; const c = unit.coords || {};
+  const W = Math.max(2, cal.width || 10);
+  const long = Math.max(c.w || 60, c.h || 26), short = Math.min(c.w || 60, c.h || 26);
+  if ('height' in cal) cal.height = Math.max(4, Math.round(short));
+  cal.number = Math.max(1, Math.min(120, Math.round(long / W)));
+  return cal;
+}
+
 function makeShape(typeKey, name) {
   if (!typeKey) {
     return { id: 'shp_' + Math.floor(rnd() * 1e6), type: '', name: '', mode: 'direct', classMask: '',
@@ -397,7 +422,9 @@ function geoToCoords(shape, geo) {
   // box
   const cx = Math.round((geo.x0 + geo.x1) / 2), cy = Math.round((geo.y0 + geo.y1) / 2);
   const w = Math.max(20, Math.round(Math.abs(geo.x1 - geo.x0))), h = Math.max(20, Math.round(Math.abs(geo.y1 - geo.y0)));
-  return { cx, cy, w, h, angle: 0 };
+  // search direction = along the longest edge, pointing toward where the last coordinate was placed
+  const dir = w >= h ? (geo.x1 >= geo.x0 ? 0 : 180) : (geo.y1 >= geo.y0 ? 90 : 270);
+  return { cx, cy, w, h, angle: 0, dir };
 }
 function quadDefaultUnitsCoords(cx, cy, w, h) {
   return [
@@ -466,14 +493,16 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
     return [cc(hh, hw), cc(hh, -hw), cc(-hh, -hw), cc(-hh, hw)].map((p) => p.join(',')).join(' ');
   };
   const CalBox = ({ pts, k }) => <polygon key={k} points={pts} fill="#2f6fed22" stroke={BLUE} strokeWidth="1.1" />;
-  // tile n caliper boxes along a box's long (width) axis, searching across (height)
+  // tile n caliper boxes end-to-end along a box's long (width) axis; each caliper spans the FULL box height
   const tileCal = (bx, by, bw, bh, bangDeg, n) => {
     const a = bangDeg * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
-    const hh = Math.min(halfH, (bh / 2) * 0.85);
+    const hh = Math.max(2, bh / 2 - 1);          // caliper height = full box cross-dimension (touch both edges)
+    const spacing = bw / n;                       // end-to-end packed
+    const hw = Math.max(1, spacing / 2 * 0.9);
     const out = [];
     for (let i = 0; i < n; i++) {
-      const t = ((i + 0.5) / n - 0.5) * bw * 0.92;
-      out.push(<CalBox key={'tc' + i} k={'tc' + i} pts={calRect(bx + ux * t, by + uy * t, halfW, hh, a + Math.PI / 2)} />);
+      const t = (i + 0.5) * spacing - bw / 2;
+      out.push(<CalBox key={'tc' + i} k={'tc' + i} pts={calRect(bx + ux * t, by + uy * t, hw, hh, a + Math.PI / 2)} />);
     }
     return out;
   };
@@ -483,10 +512,11 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
     const cx = c.cx ?? 250, cy = c.cy ?? 190, r = c.r ?? 90;
     const sector = shape.caliperType === 'Sector Caliper';
     const a0 = sector ? -0.5 : 0, a1 = sector ? 2.6 : Math.PI * 2;
-    const n = Math.min(cal.number || 12, 40), rects = [], dots = [];
+    const n = Math.min(cal.number || 24, 80), rects = [], dots = [];
+    const arc = (a1 - a0) * r, cw = Math.max(1, (arc / n) / 2 * 0.85);  // packed end-to-end around the ring
     for (let i = 0; i < n; i++) {
       const a = a0 + (a1 - a0) * (i / (sector ? n - 1 : n));
-      rects.push(<CalBox key={'c' + i} k={'c' + i} pts={calRect(cx + r * Math.cos(a), cy + r * Math.sin(a), halfW, halfH, a)} />);
+      rects.push(<CalBox key={'c' + i} k={'c' + i} pts={calRect(cx + r * Math.cos(a), cy + r * Math.sin(a), cw, halfH, a)} />);
       if (gen) { const er = r + wob(i, 4); dots.push(dot(cx + er * Math.cos(a), cy + er * Math.sin(a), GREEN, 'd' + i)); }
     }
     return (
@@ -509,11 +539,12 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
         {units.map((u, i) => {
           const cc = u.coords, cor = boxCorners(cc.cx, cc.cy, cc.w, cc.h, cc.angle);
           const sel = shape.selUnit === i;
-          const n = Math.min((u.caliper && u.caliper.number) || 8, 20);
+          const long = Math.max(cc.w, cc.h), short = Math.min(cc.w, cc.h), vertical = cc.h > cc.w;
+          const n = Math.min((u.caliper && u.caliper.number) || 8, 120);
           return (
             <g key={i}>
               <polygon points={cor.map((p) => p.join(',')).join(' ')} fill={sel ? '#e8542b18' : '#2f6fed10'} stroke={sel ? ORANGE : RED} strokeWidth={sel ? '2' : '1.4'} strokeDasharray="4 2" />
-              {showCal && tileCal(cc.cx, cc.cy, cc.w, cc.h, cc.angle, n)}
+              {showCal && tileCal(cc.cx, cc.cy, long, short, (cc.angle || 0) + (vertical ? 90 : 0), n)}
               <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
               <text x={cc.cx} y={cc.cy + 3} fill={sel ? ORANGE : RED} fontSize="9" fontWeight="700" textAnchor="middle">B{i + 1}</text>
               {gen && cor.map((p, k) => dot(p[0], p[1], GREEN, 'q' + i + k))}
@@ -533,20 +564,31 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
   const cor = boxCorners(cx, cy, w, h, ang);
   const rad = ang * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
   const local = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
-  const n = Math.min(cal.number || 12, 30);
+  // search-direction chevron: box-local direction (from the draw), rotates with the box
+  const localDir = (c.dir || 0), alongW = (localDir % 180) === 0, reach = alongW ? w / 2 : h / 2;
+  const dlx = localDir === 180 ? -reach : localDir === 0 ? reach : 0;
+  const dly = localDir === 270 ? -reach : localDir === 90 ? reach : 0;
+  const dirEdge = local(dlx, dly), dirBase = local(dlx * 0.55, dly * 0.55);
+  const n = Math.min(cal.number || 12, 120);
   let calipers = null, inner = null, extraGuide = null;
 
   if (shape.type === 'ellipse') {
     const sA = Number(shape.boundary.smallAxis ?? 0.8), lA = Number(shape.boundary.largeAxis ?? 1.2);
     // radial calipers around the mid band
     const rects = [];
-    const nn = Math.min(cal.number || 12, 28);
+    const nn = Math.min(cal.number || 24, 80);
+    const perim = Math.PI * (3 * (w / 2 + h / 2) - Math.sqrt((3 * w / 2 + h / 2) * (w / 2 + 3 * h / 2)));
+    const cw = Math.max(1, (perim / nn) / 2 * 0.8);   // packed around the ring
     for (let i = 0; i < nn; i++) {
       const t = (i / nn) * Math.PI * 2;
-      const p = local((w / 2) * Math.cos(t), (h / 2) * Math.sin(t));
-      const theta = Math.atan2(p[1] - cy, p[0] - cx);
-      rects.push(<CalBox key={'e' + i} k={'e' + i} pts={calRect(p[0], p[1], halfW, halfH, theta)} />);
-      if (gen) dot(p[0], p[1], GREEN, 'ed' + i);
+      // each caliper spans from the inner (small-axis) ellipse to the outer (large-axis) ellipse
+      const pin = local((w / 2) * sA * Math.cos(t), (h / 2) * sA * Math.sin(t));
+      const pout = local((w / 2) * lA * Math.cos(t), (h / 2) * lA * Math.sin(t));
+      const mid = [(pin[0] + pout[0]) / 2, (pin[1] + pout[1]) / 2];
+      const hlen = Math.hypot(pout[0] - pin[0], pout[1] - pin[1]) / 2;
+      const theta = Math.atan2(pout[1] - pin[1], pout[0] - pin[0]);
+      rects.push(<CalBox key={'e' + i} k={'e' + i} pts={calRect(mid[0], mid[1], cw, hlen, theta)} />);
+      if (gen) dot(mid[0], mid[1], GREEN, 'ed' + i);
     }
     calipers = rects;
     // small + large ellipse guides + axis markers at the TOP end
@@ -581,7 +623,7 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
       <polygon points={cor.map((p) => p.join(',')).join(' ')} fill="#2f6fed0f" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
       {extraGuide}
       {showCal && calipers}
-      <Chevron p0={cor[0]} p1={cor[1]} color={PURPLE} />
+      <Chevron p0={dirBase} p1={dirEdge} color={PURPLE} />
       {inner}
       <text x={cx} y={cy + h / 2 + 26} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || spec.label}{shape.type === 'line' ? ' · Line ROI' : ' · Box Caliper'}</text>
     </g>
@@ -595,16 +637,23 @@ function EyeIcon({ on }) {
     : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
 }
 
-function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
+function Canvas({ activeShape, segMode, arming, onDrawn, onRotate, onCoords, editable = true }) {
   const svgRef = useRef(null);
   const [draft, setDraft] = useState(null);
   const [showCal, setShowCal] = useState(true);
-  const rotRef = useRef(false);
+  const dragRef = useRef(null);   // {mode:'move'|'rotate'|'resize-circle'|'resize-box', dx, dy}
   const drawKind = activeShape && activeShape.type ? SHAPES[activeShape.type].drawKind : null;
 
   const toSvg = (e) => {
     const r = svgRef.current.getBoundingClientRect();
     return [(e.clientX - r.left) * (500 / r.width), (e.clientY - r.top) * (380 / r.height)];
+  };
+  const clampX = (v) => Math.max(10, Math.min(490, v));
+  const clampY = (v) => Math.max(10, Math.min(370, v));
+  const startDrag = (mode) => (e) => {
+    e.stopPropagation();
+    const [x, y] = toSvg(e); const c = (activeShape && activeShape.coords) || {};
+    dragRef.current = { mode, dx: x - (c.cx ?? 250), dy: y - (c.cy ?? 190) };
   };
   const down = (e) => {
     if (!arming || !drawKind || drawKind === 'quad') return;
@@ -612,25 +661,63 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
   };
   const move = (e) => {
     if (draft) { const [x, y] = toSvg(e); setDraft((d) => ({ ...d, x1: x, y1: y })); return; }
-    if (rotRef.current && activeShape) {
-      const [x, y] = toSvg(e); const c = activeShape.coords;
+    const d = dragRef.current; if (!d || !activeShape) return;
+    const [x, y] = toSvg(e); const c = activeShape.coords;
+    if (d.mode === 'move') {
+      onCoords({ cx: Math.round(clampX(x - d.dx)), cy: Math.round(clampY(y - d.dy)) });
+    } else if (d.mode === 'rotate') {
       const base = Math.atan2(-(c.h || 120) / 2, (c.w || 190) / 2);
       const deg = Math.round((Math.atan2(y - c.cy, x - c.cx) - base) * 180 / Math.PI);
       onRotate(((deg % 360) + 360) % 360);
+    } else if (d.mode === 'resize-circle') {
+      onCoords({ r: Math.max(10, Math.round(Math.hypot(x - c.cx, y - c.cy))) });
+    } else if (d.mode === 'resize-box') {
+      const ar = (c.angle || 0) * Math.PI / 180, cs = Math.cos(ar), sn = Math.sin(ar);
+      const dx = x - c.cx, dy = y - c.cy, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs;
+      onCoords({ w: Math.max(20, Math.round(Math.abs(lx) * 2)), h: Math.max(20, Math.round(Math.abs(ly) * 2)) });
     }
   };
   const up = () => {
     if (draft) { onDrawn(geoFromDraft(draft)); setDraft(null); }
-    rotRef.current = false;
+    dragRef.current = null;
   };
   const geoFromDraft = (d) => ({ x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1 });
 
-  // rotate handle position for box-ROI shapes (after drawn, not arming)
-  let handle = null;
-  if (activeShape && activeShape.drawn && !arming && activeShape.type &&
-      ['line', 'ellipse', 'parallel', 'edge', 'peak'].includes(activeShape.type)) {
-    const c = activeShape.coords; const cor = boxCorners(c.cx ?? 250, c.cy ?? 190, c.w ?? 190, c.h ?? 120, c.angle || 0);
-    handle = cor[1];
+  // interactive handles (after drawn, not arming): move / resize / rotate
+  let handlesJsx = null;
+  if (editable && activeShape && activeShape.drawn && !arming && activeShape.type && activeShape.type !== 'quad') {
+    const c = activeShape.coords, t = activeShape.type, HS = 5;
+    const sq = (p, mode, key, cursor) => (
+      <rect key={key} x={p[0] - HS} y={p[1] - HS} width={HS * 2} height={HS * 2} rx="1.5"
+        fill="#fff" stroke="#e8542b" strokeWidth="1.6" style={{ cursor }} onMouseDown={startDrag(mode)} />
+    );
+    const moveDot = (mx, my) => (
+      <g key="mv" onMouseDown={startDrag('move')} style={{ cursor: 'move' }}>
+        <circle cx={mx} cy={my} r="7" fill="#fff" stroke="#e8542b" strokeWidth="1.6" />
+        <path d={`M${mx - 3} ${my}h6M${mx} ${my - 3}v6`} stroke="#e8542b" strokeWidth="1.4" />
+      </g>
+    );
+    if (t === 'circle') {
+      const cx = c.cx ?? 250, cy = c.cy ?? 190, r = c.r ?? 70;
+      handlesJsx = <g>{moveDot(cx, cy)}{sq([cx + r, cy], 'resize-circle', 'rc', 'ew-resize')}</g>;
+    } else {
+      const cx = c.cx ?? 250, cy = c.cy ?? 190, w = c.w ?? 190, h = c.h ?? 120, ang = c.angle || 0;
+      const cor = boxCorners(cx, cy, w, h, ang);
+      const topMid = [(cor[0][0] + cor[1][0]) / 2, (cor[0][1] + cor[1][1]) / 2];
+      const nx = topMid[0] - cx, ny = topMid[1] - cy, nl = Math.hypot(nx, ny) || 1;
+      const rot = [topMid[0] + nx / nl * 22, topMid[1] + ny / nl * 22];
+      handlesJsx = (
+        <g>
+          {moveDot(cx, cy)}
+          {cor.map((p, i) => sq(p, 'resize-box', 'rb' + i, 'nwse-resize'))}
+          <line x1={topMid[0]} y1={topMid[1]} x2={rot[0]} y2={rot[1]} stroke="#e8542b" strokeWidth="1" opacity=".5" />
+          <g onMouseDown={startDrag('rotate')} style={{ cursor: 'grab' }}>
+            <circle cx={rot[0]} cy={rot[1]} r="6" fill="#fff" stroke="#e8542b" strokeWidth="2" />
+            <circle cx={rot[0]} cy={rot[1]} r="1.8" fill="#e8542b" />
+          </g>
+        </g>
+      );
+    }
   }
 
   return (
@@ -657,13 +744,7 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate }) {
           {[[150,100],[350,100],[150,280],[350,280]].map((p,i)=>(<circle key={i} cx={p[0]} cy={p[1]} r="9" fill="#22282e" stroke="#0d1114" strokeWidth="1.5" />))}
           {segMode && (<g><circle cx={MASK.cx} cy={MASK.cy} r={MASK.r} fill="#7c3aed" opacity=".26" /><text x={MASK.cx} y="300" fill="#c9b3ff" fontSize="10" textAnchor="middle" fontWeight="700">SEGMENTATION MASK (ROI)</text></g>)}
           <ShapeOverlay shape={activeShape} draft={draft} drawKind={drawKind} showCal={showCal} />
-          {handle && !draft && (
-            <g onMouseDown={(e) => { e.stopPropagation(); rotRef.current = true; }} style={{ cursor: 'grab' }}>
-              <line x1={activeShape.coords.cx} y1={activeShape.coords.cy} x2={handle[0]} y2={handle[1]} stroke="#e8542b" strokeWidth="1" opacity=".5" />
-              <circle cx={handle[0]} cy={handle[1]} r="6" fill="#fff" stroke="#e8542b" strokeWidth="2" />
-              <circle cx={handle[0]} cy={handle[1]} r="1.8" fill="#e8542b" />
-            </g>
-          )}
+          {handlesJsx && !draft && handlesJsx}
         </svg>
       </div>
     </div>
@@ -713,15 +794,19 @@ function BoundaryEditor({ spec, boundary, patch }) {
           </select>
         </div>
       )}
-      {spec.boundary.searchDirection && (
-        <div className="field">
-          <span className="tinylab">Search Direction</span>
+      <div className="field">
+        <span className="tinylab">Search Direction</span>
+        {spec.boundary.searchDirection ? (
           <select className="sel" value={boundary.searchDirection} onChange={(e) => patch({ searchDirection: e.target.value })}>
             {SEARCH_DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
           </select>
-          <div className="hint">Direction each caliper searches for the boundary, relative to the centre.</div>
-        </div>
-      )}
+        ) : (
+          <input className="inp" value="Shown by Arrow" disabled readOnly />
+        )}
+        <div className="hint">{spec.boundary.searchDirection
+          ? 'Direction each caliper searches for the boundary, relative to the centre.'
+          : 'Shown by the arrow (›) on the box — rotate the box to change it.'}</div>
+      </div>
       {spec.extras.map(([k, lab, sub]) => (
         <div className="field" key={k}>
           <NumberField label={lab} sub={sub} value={boundary[k]}
@@ -940,7 +1025,7 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
               </button>
               {caliperOpen && (
                 <div className="config-body">
-                  <div className="row2">
+                  <div className="calrow">
                     {spec.caliperParams.map((k) => {
                       const meta = CALIPER_PARAM_META[k];
                       const usePer = perUnit && perUnit.perCaliper;
@@ -1022,7 +1107,7 @@ function VisionConfig({ toast }) {
     if (spec.drawKind === 'quad') {
       // composite: place the 4-box template directly
       const cx = 250, cy = 190, w = 190, h = 120;
-      const units = activeShape.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(cx, cy, w, h)[i] }));
+      const units = activeShape.units.map((u, i) => { const uc = quadDefaultUnitsCoords(cx, cy, w, h)[i]; return { ...u, coords: uc, caliper: deriveUnitCaliper({ ...u, coords: uc }) }; });
       const ns = { ...activeShape, drawn: true, generated: false, offMask: false, coords: { cx, cy, w, h, angle: 0 }, units };
       updateShape({ ...ns, offMask: SHAPES[ns.type] && ns.mode === 'segmentation' ? !computeOverlap(ns) : false });
       return;
@@ -1033,13 +1118,21 @@ function VisionConfig({ toast }) {
     const coords = geoToCoords(activeShape, geo);
     let ns = { ...activeShape, drawn: true, generated: false, coords };
     if (SHAPES[ns.type].perUnit && SHAPES[ns.type].perUnit.perCoords) {
-      ns.units = ns.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(coords.cx, coords.cy, coords.w, coords.h)[i] }));
+      ns.units = ns.units.map((u, i) => { const uc = quadDefaultUnitsCoords(coords.cx, coords.cy, coords.w, coords.h)[i]; return { ...u, coords: uc, caliper: deriveUnitCaliper({ ...u, coords: uc }) }; });
     }
+    ns.caliper = deriveCaliper(ns);
     ns.offMask = ns.mode === 'segmentation' ? !computeOverlap(ns) : false;
     updateShape(ns); setArming(null);
   };
   const onRotate = (angle) => {
     const ns = { ...activeShape, coords: { ...activeShape.coords, angle }, generated: false };
+    ns.offMask = ns.mode === 'segmentation' ? !computeOverlap(ns) : false;
+    updateShape(ns);
+  };
+  // interactive move / resize on the canvas → re-derive packed calipers + full-box height
+  const onCoords = (coords) => {
+    let ns = { ...activeShape, coords: { ...activeShape.coords, ...coords }, generated: false };
+    ns.caliper = deriveCaliper(ns);
     ns.offMask = ns.mode === 'segmentation' ? !computeOverlap(ns) : false;
     updateShape(ns);
   };
@@ -1073,7 +1166,7 @@ function VisionConfig({ toast }) {
             <div className="ct" style={{ color: 'var(--orange)' }}>▧ {STEPS[step]}</div>
           </div>
           <Canvas activeShape={step >= 1 ? activeShape : null} segMode={step >= 1 && segMode}
-            arming={step === 1 && arming === (activeShape && activeShape.id)} onDrawn={onDrawn} onRotate={onRotate} />
+            arming={step === 1 && arming === (activeShape && activeShape.id)} onDrawn={onDrawn} onRotate={onRotate} onCoords={onCoords} editable={step === 1} />
           {step === 1 && arming && <div className="drawhint arm">◉ {SHAPES[activeShape.type].drawKind === 'circle' ? 'Drag from centre to set radius' : SHAPES[activeShape.type].drawKind === 'line' ? 'Drag from start to end' : 'Drag to draw the box'}</div>}
           {step === 1 && !arming && activeShape && !activeShape.type && <div className="drawhint">◆ Select a shape in the panel to begin</div>}
           {step === 1 && !arming && activeShape && activeShape.type && !activeShape.drawn && <div className="drawhint">✎ Click <span className="k">Draw</span> in the panel, then sketch here</div>}
@@ -1325,7 +1418,7 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
             </button>
             {caliperOpen && (
               <div className="config-body">
-                <div className="row2">
+                <div className="calrow">
                   {spec.caliperParams.map((k) => {
                     const meta = CALIPER_PARAM_META[k];
                     const usePer = perUnit && perUnit.perCaliper;
@@ -1367,6 +1460,7 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
   const active = shapes.find((s) => s.id === sel) || shapes[0];
   const update = (ns) => { setShapes((p) => p.map((s) => s.id === ns.id ? ns : s)); onDirty(); };
   const onRotate = (angle) => update({ ...active, coords: { ...active.coords, angle } });
+  const onCoords = (coords) => { const ns = { ...active, coords: { ...active.coords, ...coords } }; ns.caliper = deriveCaliper(ns); update(ns); };
   return (
     <div className="emc-split">
       <div className="emc-config">
@@ -1382,7 +1476,7 @@ function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
           <div className="ct">◳ Fit</div><div className="ct">⤢ Zoom</div>
           <div className="ct" style={{ color: 'var(--orange)' }}>▧ {active ? active.name : ''}</div>
         </div>
-        <Canvas activeShape={active} segMode={active && active.mode === 'segmentation'} arming={false} onDrawn={() => {}} onRotate={onRotate} />
+        <Canvas activeShape={active} segMode={active && active.mode === 'segmentation'} arming={false} onDrawn={() => {}} onRotate={onRotate} onCoords={onCoords} />
       </div>
     </div>
   );
