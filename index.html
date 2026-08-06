@@ -117,6 +117,7 @@
   .field:last-child{margin-bottom:0;}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
   .calrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;}
+  .eyehint{display:inline-flex;vertical-align:middle;margin-left:6px;color:#9aa4b2;cursor:help;}
   .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
   .rowcta{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end;}
   .modetoggle{display:flex;border:1px solid var(--line-d);border-radius:7px;overflow:hidden;}
@@ -564,11 +565,14 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
   const cor = boxCorners(cx, cy, w, h, ang);
   const rad = ang * Math.PI / 180, cos = Math.cos(rad), sin = Math.sin(rad);
   const local = (dx, dy) => [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
-  // search-direction chevron: box-local direction (from the draw), rotates with the box
-  const localDir = (c.dir || 0), alongW = (localDir % 180) === 0, reach = alongW ? w / 2 : h / 2;
-  const dlx = localDir === 180 ? -reach : localDir === 0 ? reach : 0;
-  const dly = localDir === 270 ? -reach : localDir === 90 ? reach : 0;
-  const dirEdge = local(dlx, dly), dirBase = local(dlx * 0.55, dly * 0.55);
+  // search-direction chevrons: shown on the TWO OPPOSITE edges of the box (not inside), pointing along the draw direction; rotate with the box
+  const localDir = (c.dir || 0), alongW = (localDir % 180) === 0;
+  const acrossHalf = alongW ? h / 2 : w / 2, acrossAxis = alongW ? [0, 1] : [1, 0];
+  const drad = (localDir + ang) * Math.PI / 180, dvec = [Math.cos(drad), Math.sin(drad)];
+  const dirChevrons = [1, -1].map((s, i) => {
+    const E = local(acrossAxis[0] * acrossHalf * s, acrossAxis[1] * acrossHalf * s);
+    return <Chevron key={'dc' + i} p0={[E[0] - dvec[0] * 7, E[1] - dvec[1] * 7]} p1={[E[0] + dvec[0] * 7, E[1] + dvec[1] * 7]} color={PURPLE} />;
+  });
   const n = Math.min(cal.number || 12, 120);
   let calipers = null, inner = null, extraGuide = null;
 
@@ -623,7 +627,7 @@ function ShapeOverlay({ shape, draft, drawKind, showCal }) {
       <polygon points={cor.map((p) => p.join(',')).join(' ')} fill="#2f6fed0f" stroke={ORANGE} strokeWidth="1.6" strokeDasharray="4 3" />
       {extraGuide}
       {showCal && calipers}
-      <Chevron p0={dirBase} p1={dirEdge} color={PURPLE} />
+      {dirChevrons}
       {inner}
       <text x={cx} y={cy + h / 2 + 26} fill={ORANGE} fontSize="10" fontWeight="700" textAnchor="middle">{shape.name || spec.label}{shape.type === 'line' ? ' · Line ROI' : ' · Box Caliper'}</text>
     </g>
@@ -686,20 +690,16 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate, onCoords, edi
   // interactive handles (after drawn, not arming): move / resize / rotate
   let handlesJsx = null;
   if (editable && activeShape && activeShape.drawn && !arming && activeShape.type && activeShape.type !== 'quad') {
-    const c = activeShape.coords, t = activeShape.type, HS = 5;
-    const sq = (p, mode, key, cursor) => (
-      <rect key={key} x={p[0] - HS} y={p[1] - HS} width={HS * 2} height={HS * 2} rx="1.5"
-        fill="#fff" stroke="#e8542b" strokeWidth="1.6" style={{ cursor }} onMouseDown={startDrag(mode)} />
-    );
-    const moveDot = (mx, my) => (
-      <g key="mv" onMouseDown={startDrag('move')} style={{ cursor: 'move' }}>
-        <circle cx={mx} cy={my} r="7" fill="#fff" stroke="#e8542b" strokeWidth="1.6" />
-        <path d={`M${mx - 3} ${my}h6M${mx} ${my - 3}v6`} stroke="#e8542b" strokeWidth="1.4" />
-      </g>
-    );
+    const c = activeShape.coords, t = activeShape.type;
+    // No explicit drag/stretch affordances (only rotate is shown): drag a corner to stretch, drag the interior to move.
     if (t === 'circle') {
       const cx = c.cx ?? 250, cy = c.cy ?? 190, r = c.r ?? 70;
-      handlesJsx = <g>{moveDot(cx, cy)}{sq([cx + r, cy], 'resize-circle', 'rc', 'ew-resize')}</g>;
+      handlesJsx = (
+        <g>
+          <circle cx={cx} cy={cy} r={Math.max(6, r)} fill="transparent" style={{ cursor: 'move' }} onMouseDown={startDrag('move')} />
+          <circle cx={cx} cy={cy} r={Math.max(6, r)} fill="none" stroke="transparent" strokeWidth="16" style={{ cursor: 'nwse-resize', pointerEvents: 'stroke' }} onMouseDown={startDrag('resize-circle')} />
+        </g>
+      );
     } else {
       const cx = c.cx ?? 250, cy = c.cy ?? 190, w = c.w ?? 190, h = c.h ?? 120, ang = c.angle || 0;
       const cor = boxCorners(cx, cy, w, h, ang);
@@ -708,8 +708,8 @@ function Canvas({ activeShape, segMode, arming, onDrawn, onRotate, onCoords, edi
       const rot = [topMid[0] + nx / nl * 22, topMid[1] + ny / nl * 22];
       handlesJsx = (
         <g>
-          {moveDot(cx, cy)}
-          {cor.map((p, i) => sq(p, 'resize-box', 'rb' + i, 'nwse-resize'))}
+          <polygon points={cor.map((p) => p.join(',')).join(' ')} fill="transparent" style={{ cursor: 'move' }} onMouseDown={startDrag('move')} />
+          {cor.map((p, i) => <circle key={'rb' + i} cx={p[0]} cy={p[1]} r="11" fill="transparent" style={{ cursor: 'nwse-resize' }} onMouseDown={startDrag('resize-box')} />)}
           <line x1={topMid[0]} y1={topMid[1]} x2={rot[0]} y2={rot[1]} stroke="#e8542b" strokeWidth="1" opacity=".5" />
           <g onMouseDown={startDrag('rotate')} style={{ cursor: 'grab' }}>
             <circle cx={rot[0]} cy={rot[1]} r="6" fill="#fff" stroke="#e8542b" strokeWidth="2" />
@@ -795,7 +795,9 @@ function BoundaryEditor({ spec, boundary, patch }) {
         </div>
       )}
       <div className="field">
-        <span className="tinylab">Search Direction</span>
+        <span className="tinylab">Search Direction{!spec.boundary.searchDirection && (
+          <span className="eyehint" title="The arrow (›) on the two opposite edges of the box shows the direction of search. Rotate the box to change it."><EyeIcon on={true} /></span>
+        )}</span>
         {spec.boundary.searchDirection ? (
           <select className="sel" value={boundary.searchDirection} onChange={(e) => patch({ searchDirection: e.target.value })}>
             {SEARCH_DIRECTIONS.map((d) => <option key={d}>{d}</option>)}
@@ -803,9 +805,9 @@ function BoundaryEditor({ spec, boundary, patch }) {
         ) : (
           <input className="inp" value="Shown by Arrow" disabled readOnly />
         )}
-        <div className="hint">{spec.boundary.searchDirection
-          ? 'Direction each caliper searches for the boundary, relative to the centre.'
-          : 'Shown by the arrow (›) on the box — rotate the box to change it.'}</div>
+        {spec.boundary.searchDirection && (
+          <div className="hint">Direction each caliper searches for the boundary, relative to the centre.</div>
+        )}
       </div>
       {spec.extras.map(([k, lab, sub]) => (
         <div className="field" key={k}>
@@ -987,9 +989,6 @@ function ShapeCard({ shape, idx, selected, onSelect, onChange, onRemove, showErr
               </button>
             )}
             {arming && <div className="hint">{spec.drawKind === 'circle' ? 'Drag from centre outward to set the radius.' : 'Drag to draw the rectangular ROI.'}</div>}
-            {shape.drawn && isBoxCaliper && (
-              <div className="hint">The arrow (›) on the box shows the direction of search. To change the direction, rotate the box.</div>
-            )}
             {shape.drawn && shape.mode === 'segmentation' && !shape.offMask && <div className="okline">✓ Calipers overlap the segmentation mask</div>}
             {overlapErr && <div className="err">⚠ Drawn ROI has no overlap with the segmentation mask. Reposition / redraw the shape.</div>}
             {shape.drawn && axisErr && <div className="err">⚠ Fix the ellipse axis values below before generating.</div>}
@@ -1401,9 +1400,6 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
               <input className="roinput" value={(CLASS_MASKS.find((m) => m.id === shape.classMask) || {}).label || ''} readOnly /></div>
           )}
 
-          {(spec.drawKind === 'box' || spec.drawKind === 'quad') && (
-            <div className="hint" style={{ marginBottom: 12 }}>The arrow (›) on the box shows the direction of search. To change the direction, rotate the box.</div>
-          )}
 
           {/* Editable coordinates */}
           <div className="field">
