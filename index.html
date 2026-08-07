@@ -1254,6 +1254,7 @@ function VisionConfig({ toast }) {
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const DIST_AXIS_OPTS = ['x', 'y', 'euclidean'];
 const REF_POINT_OPTS = ['point-to-point', 'centre-to-centre', 'edge-to-edge', 'nearest'];
+const LABEL_SIZE_OPTS = [{ n: 'Small', px: 11 }, { n: 'Medium', px: 14 }, { n: 'Large', px: 18 }, { n: 'X-Large', px: 22 }];
 const UNIT_OPTS = ['mm', 'mm²', '°', 'px'];
 
 // Per-shape dimensioning features, split by kind. Multi-line shapes flatten to "Edge 2 · Middle".
@@ -1336,7 +1337,7 @@ function typeDefaults(type, shapes) {
 function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
-    type: 2, distanceAxis: 'euclidean', refPoint: 'point-to-point', piecewise: false,
+    type: 2, distanceAxis: 'euclidean', refPoint: 'point-to-point', piecewise: false, labelSize: 14,
     operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
@@ -1566,12 +1567,15 @@ function DimensionCanvas({ dim, shapes }) {
           {pA && pB && <line x1={pA[0]} y1={pA[1]} x2={pB[0]} y2={pB[1]} stroke={col} strokeWidth="2.4" />}
           {pA && <circle cx={pA[0]} cy={pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
           {pB && <circle cx={pB[0]} cy={pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
-          {mid && (
-            <g>
-              <rect x={mid[0] - label.length * 3.6 - 6} y={mid[1] - 22} width={label.length * 7.2 + 12} height="17" rx="4" fill={col} />
-              <text x={mid[0]} y={mid[1] - 10} fill="#fff" fontSize="11" fontWeight="700" textAnchor="middle">{label}</text>
-            </g>
-          )}
+          {mid && (() => {
+            const fs = dim.labelSize || 14, w = label.length * fs * 0.62 + 12, h = fs + 6, ry = mid[1] - 6 - h;
+            return (
+              <g>
+                <rect x={mid[0] - w / 2} y={ry} width={w} height={h} rx="4" fill={col} />
+                <text x={mid[0]} y={ry + h / 2 + 1} fill="#fff" fontSize={fs} fontWeight="700" textAnchor="middle" dominantBaseline="middle">{label}</text>
+              </g>
+            );
+          })()}
           {!cfg.two && pA && <text x={pA[0]} y={pA[1] + 18} fill={col} fontSize="10" fontWeight="700" textAnchor="middle">{cfg.name}</text>}
         </svg>
       </div>
@@ -1671,7 +1675,13 @@ function DimensionForm({ draft, setDraft, shapes }) {
             </select></div>
         </div>
       </div>
-      <div className="hint">At inference, this dimension is drawn as a single line labelled “{draft.name}”, in the OK colour when in-spec and the NG colour when out of tolerance.</div>
+      <div className="field">
+        <span className="tinylab">Label Text Size</span>
+        <select className="sel" value={draft.labelSize} onChange={(e) => patch({ labelSize: Number(e.target.value) })}>
+          {LABEL_SIZE_OPTS.map((o) => <option key={o.px} value={o.px}>{o.n}</option>)}
+        </select>
+      </div>
+      <div className="hint">At inference, this dimension is drawn as a single line labelled “{draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.</div>
     </div>
   );
 }
