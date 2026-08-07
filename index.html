@@ -1253,7 +1253,7 @@ function VisionConfig({ toast }) {
 /* ================= EDGE · EDIT MODULE CONFIGURATIONS ================= */
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const DIST_AXIS_OPTS = ['x', 'y', 'euclidean'];
-const EUC_MODE_OPTS = ['centre-to-centre', 'edge-to-edge', 'nearest'];
+const REF_POINT_OPTS = ['point-to-point', 'centre-to-centre', 'edge-to-edge', 'nearest'];
 const UNIT_OPTS = ['mm', 'mm²', '°', 'px'];
 
 // Per-shape dimensioning features, split by kind. Multi-line shapes flatten to "Edge 2 · Middle".
@@ -1323,17 +1323,20 @@ function typeDefaults(type, shapes) {
   const cfg = DIM_TYPE_CFG[type];
   const valid = shapes.filter((s) => shapeQualifies(s, type));
   const s0 = valid[0], s1 = valid[1] || valid[0];
-  const f = (s) => (cfg.keyPick && s ? (featuresOf(s, type)[0] || '') : '');
+  const pt = (s) => (s && s.type !== 'peak' ? (((SHAPE_FEATURES[s.type] || {}).points || [])[0] || '') : '');
+  // Distance defaults to point-to-point, so seed each feature's 0d point; Length seeds its scalar key.
+  const selOne = cfg.keyPick ? (featuresOf(s0, type)[0] || '') : (type === 2 ? pt(s0) : '');
+  const selTwo = type === 2 ? pt(s1) : '';
   return {
-    shapeOneId: s0 ? s0.id : '', shapeOneSelector: f(s0),
-    shapeTwoId: cfg.two && s1 ? s1.id : '', shapeTwoSelector: '',
+    shapeOneId: s0 ? s0.id : '', shapeOneSelector: selOne,
+    shapeTwoId: cfg.two && s1 ? s1.id : '', shapeTwoSelector: selTwo,
     unit: cfg.unit,
   };
 }
 function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
-    type: 2, distanceAxis: 'euclidean', euclideanMode: 'centre-to-centre', piecewise: false,
+    type: 2, distanceAxis: 'euclidean', refPoint: 'point-to-point', piecewise: false,
     operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
@@ -1570,13 +1573,20 @@ function DimensionCanvas({ dim, shapes }) {
 function DimensionForm({ draft, setDraft, shapes }) {
   const cfg = DIM_TYPE_CFG[draft.type];
   const patch = (p) => setDraft({ ...draft, ...p });
+  // 0d points a shape exposes (Peak is itself the point → none to pick).
+  const pointsOf = (id) => { const s = shapes.find((x) => x.id === id); return (s && s.type !== 'peak') ? ((SHAPE_FEATURES[s.type] || {}).points || []) : []; };
+  const p2p = cfg.axis && draft.refPoint === 'point-to-point';
   const changeType = (type) => patch({ type, ...typeDefaults(type, shapes) });
   const changeShape = (which, id) => {
-    const sel = cfg.keyPick ? (featuresOf(shapes.find((s) => s.id === id), draft.type)[0] || '') : '';
-    patch(which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id });
+    let sel = '';
+    if (cfg.keyPick) sel = featuresOf(shapes.find((s) => s.id === id), draft.type)[0] || '';
+    else if (p2p) sel = pointsOf(id)[0] || '';
+    patch(which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
   };
   const validShapes = shapes.filter((s) => shapeQualifies(s, draft.type));
   const aFeats = featuresOf(shapes.find((s) => s.id === draft.shapeOneId), draft.type);
+  const oneIsPeak = (shapes.find((x) => x.id === draft.shapeOneId) || {}).type === 'peak';
+  const twoIsPeak = (shapes.find((x) => x.id === draft.shapeTwoId) || {}).type === 'peak';
   const shapeSelect = (val, onCh) => (
     <select className="sel" value={val} onChange={onCh}>{validShapes.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
   );
@@ -1594,8 +1604,8 @@ function DimensionForm({ draft, setDraft, shapes }) {
         </div>
         {cfg.axis && <div><span className="tinylab">Distance Axis</span>
           <select className="sel" value={draft.distanceAxis} onChange={(e) => patch({ distanceAxis: e.target.value })}>{DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
-        {cfg.axis && draft.distanceAxis === 'euclidean' && <div><span className="tinylab">Euclidean Mode</span>
-          <select className="sel" value={draft.euclideanMode} onChange={(e) => patch({ euclideanMode: e.target.value })}>{EUC_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
+        {cfg.axis && <div><span className="tinylab">Reference Point</span>
+          <select className="sel" value={draft.refPoint} onChange={(e) => { const rp = e.target.value; const u = { refPoint: rp }; if (rp === 'point-to-point') { u.shapeOneSelector = pointsOf(draft.shapeOneId)[0] || ''; u.shapeTwoSelector = pointsOf(draft.shapeTwoId)[0] || ''; } patch(u); }}>{REF_POINT_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
         {cfg.piecewise && <div><span className="tinylab">Piecewise</span>
           <select className="sel" value={draft.piecewise ? 'Yes' : 'No'} onChange={(e) => patch({ piecewise: e.target.value === 'Yes' })}><option>No</option><option>Yes</option></select></div>}
       </div>
@@ -1604,14 +1614,18 @@ function DimensionForm({ draft, setDraft, shapes }) {
         <div className="feat">
           {shapeSelect(draft.shapeOneId, (e) => changeShape('one', e.target.value))}
           {cfg.keyPick && <select className="sel" value={draft.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{aFeats.map((f) => <option key={f}>{f}</option>)}</select>}
+          {p2p && !oneIsPeak && <select className="sel" value={draft.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{pointsOf(draft.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
         </div>
+        {p2p && oneIsPeak && <div className="hint">Peak is itself the point.</div>}
       </div>
       {cfg.two && (
         <div className="field">
           <span className="tinylab">Feature B</span>
           <div className="feat">
             {shapeSelect(draft.shapeTwoId, (e) => changeShape('two', e.target.value))}
+            {p2p && !twoIsPeak && <select className="sel" value={draft.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{pointsOf(draft.shapeTwoId).map((f) => <option key={f}>{f}</option>)}</select>}
           </div>
+          {p2p && twoIsPeak && <div className="hint">Peak is itself the point.</div>}
         </div>
       )}
       {cfg.gt && (
@@ -1707,8 +1721,8 @@ function DimensionConfig({ dims, setDims, shapes }) {
                   <td>{i + 1}</td>
                   <td><span className="dot" style={{ background: d.okColor }} />{d.name}</td>
                   <td>{cfg.name}</td>
-                  <td>{shapeName(d.shapeOneId)}{cfg.keyPick && d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
-                  <td>{cfg.two ? shapeName(d.shapeTwoId) : '—'}</td>
+                  <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
+                  <td>{cfg.two ? `${shapeName(d.shapeTwoId)}${d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}` : '—'}</td>
                   <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
                   <td className="acts">
                     <span title="Edit" onClick={() => startEdit(d)}>✎</span>
