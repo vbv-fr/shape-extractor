@@ -1367,7 +1367,8 @@ function seedDims() { return []; }
 function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
   const [caliperOpen, setCaliperOpen] = useState(false);
   const spec = SHAPES[shape.type];
-  const set = (patch) => onChange({ ...shape, ...patch });
+  // Editing coords / calipers / boundary clears the trace so it must be re-generated (like Vision). Switching box tabs or (re)generating does not.
+  const set = (patch) => onChange({ ...shape, ...patch, ...(('generated' in patch || 'selUnit' in patch) ? {} : { generated: false }) });
   const perUnit = spec.perUnit;
   const curUnit = perUnit ? shape.units[shape.selUnit] : null;
   const coordDefs = spec.coordsByCaliper ? spec.coordsByCaliper[shape.caliperType] : spec.coords;
@@ -1403,6 +1404,15 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
               <input className="roinput" value={(CLASS_MASKS.find((m) => m.id === shape.classMask) || {}).label || ''} readOnly /></div>
           )}
 
+          {/* Generate the shape trace on the canvas (like Vision) */}
+          <div className="field">
+            <button className={'genbtn' + (shape.generated ? ' re' : '')} onClick={() => set({ generated: true })}>
+              {shape.generated ? '↻ Regenerate' : '✦ Generate Shape'}
+            </button>
+            {shape.generated
+              ? <div className="okline">✓ Shape trace generated on canvas</div>
+              : <div className="hint">Generate the shape to draw its trace on the master image.</div>}
+          </div>
 
           {/* Editable coordinates */}
           <div className="field">
@@ -1466,8 +1476,8 @@ function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
 function EdgeShapeEditor({ shapes, setShapes, sel, setSel, onDirty }) {
   const active = shapes.find((s) => s.id === sel) || shapes[0];
   const update = (ns) => { setShapes((p) => p.map((s) => s.id === ns.id ? ns : s)); onDirty(); };
-  const onRotate = (angle) => update({ ...active, coords: { ...active.coords, angle } });
-  const onCoords = (coords) => { const ns = { ...active, coords: { ...active.coords, ...coords } }; ns.caliper = deriveCaliper(ns); update(ns); };
+  const onRotate = (angle) => update({ ...active, coords: { ...active.coords, angle }, generated: false });
+  const onCoords = (coords) => { const ns = { ...active, coords: { ...active.coords, ...coords }, generated: false }; ns.caliper = deriveCaliper(ns); update(ns); };
   return (
     <div className="emc-split">
       <div className="emc-config">
