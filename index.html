@@ -1273,13 +1273,14 @@ const SHAPE_FEATURES = {
   peak:     { points: ['Peak coordinate'], lines: [], closed: false },
 };
 // Shape-level scalar keys (the measurable outputs a shape emits; used by the Length dimension's sub-dropdown).
+// Length dimension — the length-type keys a shape exposes (no angle keys).
 const SHAPE_KEYS = {
-  circle:   ['Radius', 'Perimeter', 'Area', 'Circularity', 'Convexity', 'Contour Continuity'],
-  line:     ['Length', 'Angle'],
-  ellipse:  ['Major axis', 'Minor axis', 'Angle'],
+  circle:   ['Radius', 'Diameter', 'Perimeter'],
+  line:     ['Length'],
+  ellipse:  ['Major axis', 'Minor axis'],
   quad:     ['Edge 1', 'Edge 2', 'Edge 3', 'Edge 4', 'Diagonal 1', 'Diagonal 2'],
-  parallel: ['Line 1', 'Line 2', 'Angle'],
-  edge:     ['Line 1', 'Angle 1'],
+  parallel: ['Line 1', 'Line 2'],
+  edge:     ['Line 1', 'Line 2', 'Line 3'],
   peak:     [],
 };
 // Inference line colour palette (dropdown, not a hex picker).
@@ -1306,7 +1307,7 @@ const DIM_TYPE_CFG = {
   1: { name: 'Angle', param: '1d', two: true, gt: true, unit: '°', linePick: true },
   2: { name: 'Distance', param: '0d', two: true, gt: true, unit: 'mm', axis: true },
   3: { name: 'Area', param: '2d', two: false, gt: true, unit: 'mm²' },
-  4: { name: 'Length', param: '1d', two: false, gt: true, unit: 'mm', piecewise: true, keyPick: true },
+  4: { name: 'Length', param: '1d', two: false, gt: true, unit: 'mm', keyPick: true },
   5: { name: 'Convexity', param: 'closed', two: false, gt: false, unit: '' },
   6: { name: 'ContourContinuity', param: 'closed', two: false, gt: false, unit: '' },
 };
@@ -1343,7 +1344,7 @@ function typeDefaults(type, shapes) {
 function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
-    type: 2, distanceAxis: 'euclidean', angleMode: 'two features', piecewise: false, labelSize: 14,
+    type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
     operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
@@ -1647,8 +1648,6 @@ function DimensionForm({ draft, setDraft, shapes }) {
           <select className="sel" value={draft.distanceAxis} onChange={(e) => patch({ distanceAxis: e.target.value })}>{DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
         {cfg.linePick && <div><span className="tinylab">Angle from</span>
           <select className="sel" value={angleMode} onChange={(e) => patch({ angleMode: e.target.value })}>{ANGLE_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
-        {cfg.piecewise && <div><span className="tinylab">Piecewise</span>
-          <select className="sel" value={draft.piecewise ? 'Yes' : 'No'} onChange={(e) => patch({ piecewise: e.target.value === 'Yes' })}><option>No</option><option>Yes</option></select></div>}
       </div>
       <div className="field">
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
