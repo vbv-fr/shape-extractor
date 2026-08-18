@@ -1343,7 +1343,7 @@ function typeDefaults(type, shapes) {
 }
 function makeDim(shapes, n) {
   return {
-    id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Dimension_' + n,
+    id: 'dim_' + Math.floor(rnd() * 1e6), name: DIM_TYPE_CFG[2].name + '_' + n,
     type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
     operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
@@ -1603,7 +1603,7 @@ function DimensionForm({ draft, setDraft, shapes }) {
   const twoShape = shapes.find((x) => x.id === draft.shapeTwoId);
   const oneIsPeak = (oneShape || {}).type === 'peak';
   const twoIsPeak = (twoShape || {}).type === 'peak';
-  const oneIsLine = (oneShape || {}).type === 'line';
+  const twoIsLine = (twoShape || {}).type === 'line';
   // Base per-feature sub-dropdown: Length→scalar keys, Angle→line features, Distance→0d points.
   const subOptsFor = (id) => {
     const s = shapes.find((x) => x.id === id); if (!s) return [];
@@ -1616,14 +1616,17 @@ function DimensionForm({ draft, setDraft, shapes }) {
   const optsB = (() => {
     const base = subOptsFor(draft.shapeTwoId);
     if (!cfg.axis || twoIsPeak) return base;                          // Distance only; peak B has no dropdown
-    const extra = ['nearest from previous point'];
-    if (oneIsLine) extra.push('perpendicular from previous point');   // perpendicular needs a line as Feature A
+    const extra = [];
+    if (twoIsLine) extra.push('perpendicular on the line');   // perpendicular from Feature A's point onto Feature B's line (extended line always considered)
     return [...base, ...extra];
   })();
   const showSubA = (() => { const o = subOptsFor(draft.shapeOneId); return cfg.linePick ? o.length > 1 : o.length > 0; })();
   const showSubB = cfg.linePick ? (subOptsFor(draft.shapeTwoId).length > 1) : (optsB.length > 0);
   const defSel = (id) => subOptsFor(id)[0] || '';
-  const changeType = (type) => patch({ type, ...typeDefaults(type, shapes) });
+  // Dimension name = <TypeName>_<suffix>; the prefix is locked to the current type and follows type changes.
+  const namePrefix = cfg.name + '_';
+  const nameSuffix = draft.name.startsWith(namePrefix) ? draft.name.slice(namePrefix.length) : draft.name;
+  const changeType = (type) => patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix, ...typeDefaults(type, shapes) });
   const changeShape = (which, id) => {
     const sel = defSel(id);
     patch(which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
@@ -1634,10 +1637,6 @@ function DimensionForm({ draft, setDraft, shapes }) {
   );
   return (
     <div style={{ padding: '4px 2px' }}>
-      <div className="field">
-        <span className="lbl">Dimension Name</span>
-        <input className="inp" type="text" value={draft.name} onChange={(e) => patch({ name: e.target.value })} />
-      </div>
       <div className="row3 field">
         <div><span className="tinylab">Type</span>
           <select className="sel" value={draft.type} onChange={(e) => changeType(Number(e.target.value))}>
@@ -1685,20 +1684,20 @@ function DimensionForm({ draft, setDraft, shapes }) {
           )}
         </>
       )}
-      <div className="block-t" style={{ marginTop: 8 }}>Inference Line Colours <span className="ln" /></div>
+      <div className="block-t" style={{ marginTop: 8 }}>Inference Line Colour{cfg.gt ? 's' : ''} <span className="ln" /></div>
       <div className="row2 field">
-        <div><span className="tinylab">OK colour</span>
+        <div><span className="tinylab">{cfg.gt ? 'OK colour' : 'Colour'}</span>
           <div className="colorwrap"><span className="swatch" style={{ background: draft.okColor }} />
             <select className="sel bare" value={draft.okColor} onChange={(e) => patch({ okColor: e.target.value })}>
               {LINE_COLOURS.map((c) => <option key={c.hex} value={c.hex}>{c.name}</option>)}
             </select></div>
         </div>
-        <div><span className="tinylab">NG colour</span>
+        {cfg.gt && <div><span className="tinylab">NG colour</span>
           <div className="colorwrap"><span className="swatch" style={{ background: draft.ngColor }} />
             <select className="sel bare" value={draft.ngColor} onChange={(e) => patch({ ngColor: e.target.value })}>
               {LINE_COLOURS.map((c) => <option key={c.hex} value={c.hex}>{c.name}</option>)}
             </select></div>
-        </div>
+        </div>}
       </div>
       <div className="field">
         <span className="tinylab">Label Text Size</span>
@@ -1706,7 +1705,17 @@ function DimensionForm({ draft, setDraft, shapes }) {
           {LABEL_SIZE_OPTS.map((o) => <option key={o.px} value={o.px}>{o.n}</option>)}
         </select>
       </div>
-      <div className="hint">At inference, this dimension is drawn as a single line labelled “{draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.</div>
+      <div className="hint">{cfg.gt
+        ? `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.`
+        : `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the colour set above (${cfg.name} has no ground truth, so there is no OK/NG state).`}</div>
+      <div className="block-t" style={{ marginTop: 8 }}>Dimension Name <span className="ln" /></div>
+      <div className="field">
+        <span className="namewrap">
+          <span className="nameprefix">{cfg.name}_</span>
+          <input className="nameinput" type="text" value={nameSuffix} placeholder="1"
+            onChange={(e) => patch({ name: cfg.name + '_' + e.target.value.replace(/\s+/g, '') })} />
+        </span>
+      </div>
     </div>
   );
 }
