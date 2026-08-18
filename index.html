@@ -214,6 +214,11 @@
     background:#ffffffee;border:1px solid var(--line);border-radius:8px;padding:3px;box-shadow:0 1px 3px #0000001a;}
   .canvasmodes button{border:0;background:transparent;border-radius:6px;padding:4px 10px;font-size:10.5px;font-weight:700;color:var(--muted);}
   .canvasmodes button.on{background:var(--ink);color:#fff;}
+  .canvasmodes button{display:flex;align-items:center;gap:6px;white-space:nowrap;}
+  .canvasmodes .cdot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+  .capnote{background:#ffffffee;border:1px solid var(--line);border-radius:7px;padding:4px 9px;
+    font-size:10.5px;font-weight:600;color:var(--muted);box-shadow:0 1px 2px #0000001a;}
+  .capnote b{color:var(--ink);}
   .caplegend{position:absolute;bottom:8px;left:8px;z-index:7;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
   .caplegend .swapbtn{background:#ffffffee;border:1px solid var(--line);border-radius:7px;padding:3px 8px;font-size:10px;font-weight:700;color:var(--ink);}
   .blendbar{position:absolute;bottom:8px;right:8px;z-index:7;display:flex;align-items:center;gap:7px;
@@ -385,10 +390,10 @@ const SEARCH_AREAS = [
 // Captures (camera configs) inside the selected variant. A dimension may span two captures
 // ONLY when they have identical image dimensions — same view, different focus.
 const CAPTURES = [
-  { id: 'cap1', name: 'Cam 1', pos: 'Position 1', w: 1280, h: 1024, focus: 'focused on the outer edge', tint: '#5b8cff' },
-  { id: 'cap2', name: 'Cam 2', pos: 'Position 1', w: 1280, h: 1024, focus: 'focused on the cylinder face', tint: '#ffa14d' },
-  { id: 'cap3', name: 'Cam 3', pos: 'Position 2', w: 1920, h: 1200, focus: 'wide view', tint: '#4dd6b0' },
-  { id: 'cap4', name: 'Cam 4', pos: 'Position 2', w: 1280, h: 1024, focus: 'a different viewpoint', tint: '#e879f9',
+  { id: 'cap1', name: 'Capture 1', pos: 'Position 1', w: 1280, h: 1024, focus: 'focused on the outer edge', tint: '#5b8cff' },
+  { id: 'cap2', name: 'Capture 2', pos: 'Position 1', w: 1280, h: 1024, focus: 'focused on the cylinder face', tint: '#ffa14d' },
+  { id: 'cap3', name: 'Capture 3', pos: 'Position 2', w: 1920, h: 1200, focus: 'wide view', tint: '#4dd6b0' },
+  { id: 'cap4', name: 'Capture 4', pos: 'Position 2', w: 1280, h: 1024, focus: 'a different viewpoint', tint: '#e879f9',
     xform: 'translate(46,-26) rotate(7 250 190)' },
 ];
 const capById = (id) => CAPTURES.find((c) => c.id === id) || CAPTURES[0];
@@ -1436,7 +1441,7 @@ function seedEdgeShapes() {
   const quad = mk('quad', 'Quadrilateral_1', 'cap1', { cx: 250, cy: 190, w: 190, h: 120, angle: 0 });
   quad.units = quad.units.map((u, i) => ({ ...u, coords: quadDefaultUnitsCoords(250, 190, 190, 120)[i] }));
   return [
-    // Cam 2 resolves the cylinder face; Cam 1 resolves the outer edge — the driving use case
+    // Capture 2 resolves the cylinder face; Capture 1 resolves the outer edge — the driving use case
     mk('circle', 'Circle_1', 'cap2', { cx: 250, cy: 190, r: 70 }),
     mk('edge', 'EdgeSearch_1', 'cap1', { cx: 126, cy: 190, w: 230, h: 30, angle: 90 }),
     mk('line', 'Line_1', 'cap1', { cx: 250, cy: 96, w: 200, h: 40, angle: 0 }),
@@ -1444,9 +1449,9 @@ function seedEdgeShapes() {
     quad,
     mk('parallel', 'ParallelLine_1', 'cap2', { cx: 250, cy: 262, w: 200, h: 52, angle: 0 }),
     mk('peak', 'Peak_1', 'cap2', { cx: 330, cy: 300, w: 110, h: 60, angle: 0 }),
-    // different image dimensions — must never appear opposite a Cam 1 / Cam 2 feature
+    // different image dimensions — must never appear opposite a Capture 1 / Capture 2 feature
     mk('circle', 'Circle_2', 'cap3', { cx: 250, cy: 190, r: 58 }),
-    // same 1280 × 1024 as Cam 1/Cam 2, but a different capture position — pairs, yet must not
+    // same 1280 × 1024 as Capture 1/Capture 2, but a different capture position — pairs, yet must not
     mk('circle', 'Circle_3', 'cap4', { cx: 296, cy: 164, r: 66 }),
   ];
 }
@@ -1599,13 +1604,13 @@ function PartBackdrop() {
         <radialGradient id="boss2" cx=".38" cy=".32" r=".8"><stop offset="0" stopColor="#6e7987" /><stop offset=".55" stopColor="#414a54" /><stop offset="1" stopColor="#232a31" /></radialGradient>
       </defs>
       <rect width="500" height="380" fill="#0b0e11" />
-      {/* bracket body — the crisp left edge at x≈122 is what Cam 1 resolves */}
+      {/* bracket body — the crisp left edge at x≈122 is what Capture 1 resolves */}
       <path d="M122 46 L378 46 L378 300 L330 340 L170 340 L122 300 Z" fill="url(#metal2)" stroke="#8e99a6" strokeWidth="1.6" />
       <path d="M122 46 L378 46 L378 300 L330 340 L170 340 L122 300 Z" fill="url(#sheen2)" />
       <line x1="122" y1="46" x2="122" y2="300" stroke="#c2cbd6" strokeWidth="2" />
       <line x1="136" y1="52" x2="136" y2="296" stroke="#5d6773" strokeWidth="1" opacity=".8" />
       <line x1="146" y1="96" x2="360" y2="96" stroke="#7b8592" strokeWidth="1.4" opacity=".85" />
-      {/* the cylindrical boss — what Cam 2 resolves */}
+      {/* the cylindrical boss — what Capture 2 resolves */}
       <circle cx="250" cy="190" r="70" fill="url(#boss2)" stroke="#111519" strokeWidth="2" />
       <circle cx="250" cy="190" r="52" fill="#39414a" stroke="#0e1216" strokeWidth="1.6" />
       <circle cx="250" cy="190" r="34" fill="#242b32" stroke="#0c0f13" strokeWidth="1.4" />
@@ -1692,32 +1697,20 @@ function shapeOutline(s, key, colour) {
 
 // Canvas preview of the dimension being authored.
 // Captures paired inside one term are pixel-aligned (identical image dimensions is enforced on the
-// dropdown), so a feature from one sits at the SAME coordinates on the other. Three ways to look at it:
-//   • Focus mosaic (default) — base capture's pixels, with each other capture's pixels patched into the
-//     ROIs of the features it owns, so every feature is shown by the capture that actually resolves it.
-//   • Curtain — free-form swipe between two captures.
-//   • Blend — cross-fade; its job is to prove the captures really are the same view.
-// A compound dimension draws every term, each marked with its operator, under one combined label.
+// dropdown), so a feature from one sits at the SAME coordinates on the other. The default view
+// SUPERPOSES every capture the dimension touches at equal opacity — the images are near-identical,
+// so the overlay reads cleanly and any misalignment is immediately obvious. Tabs step through the
+// individual captures: each shows its own pixels at full strength and emphasises the terms
+// configured on it, with the rest kept faint for context.
 function DimensionCanvas({ dim, shapes }) {
   const byId = (id) => shapes.find((s) => s.id === id);
   const terms = allTerms(dim);
   const caps = capturesUsed(dim);
-  const cross = caps.length > 1;
+  const multi = caps.length > 1;
 
-  const [mode, setMode] = useState('mosaic');
-  const [baseId, setBaseId] = useState(caps[0]);
-  const [curtain, setCurtain] = useState(250);
-  const [blend, setBlend] = useState(0.55);
-  const svgRef = useRef(null);
-  const swapped = useRef(false);
-  // the base capture follows Feature A's capture until the operator swaps it by hand
-  useEffect(() => {
-    if (!caps.includes(baseId) || !swapped.current) setBaseId(caps[0]);
-  }, [caps.join('|')]);
-
-  const baseCap = capById(caps.includes(baseId) ? baseId : caps[0]);
-  const otherCaps = caps.filter((c) => c !== baseCap.id).map(capById);
-  const swapCap = otherCaps[0] || baseCap;   // curtain / blend compare against the first other capture
+  const [tab, setTab] = useState('all');            // 'all' = superposed, else a captureId
+  useEffect(() => { if (tab !== 'all' && !caps.includes(tab)) setTab('all'); }, [caps.join('|')]);
+  const active = tab === 'all' ? null : tab;
 
   // every shape a term touches, tagged with the capture that owns it
   const usedShapes = [];
@@ -1729,92 +1722,61 @@ function DimensionCanvas({ dim, shapes }) {
       if (sh && !usedShapes.some((u) => u.id === sh.id)) usedShapes.push(sh);
     });
   });
-  const patchesFor = (capId) => usedShapes.filter((sh) => sh.captureId === capId).map((sh) => padBox(shapeBBox(sh), 24));
 
-  // one drawable segment per term
+  // one drawable segment per term, tagged with the captures it belongs to
   const segs = terms.map((t, i) => {
     const cfg = DIM_TYPE_CFG[t.type];
     const two = cfg.linePick ? (t.angleMode || 'two features') === 'two features' : cfg.two;
     const sA = byId(t.shapeOneId), sB = two ? byId(t.shapeTwoId) : null;
+    const on = [sA, sB].filter(Boolean).map((sh) => sh.captureId);
     return {
-      key: t.id || 'base', op: i === 0 ? null : t.op, type: cfg.name,
+      key: t.id || 'base', op: i === 0 ? null : t.op, type: cfg.name, caps: on,
+      // a term belongs to the active tab only when every one of its features lives there
+      here: !active || (on.length > 0 && on.every((c) => c === active)),
       pA: sA ? featPoint(sA, t.shapeOneSelector) : null,
       pB: sB ? featPoint(sB, t.shapeTwoSelector) : null,
     };
   });
-  const mids = segs.map((g) => g.pA && g.pB ? [(g.pA[0] + g.pB[0]) / 2, (g.pA[1] + g.pB[1]) / 2] : g.pA).filter(Boolean);
+  const shown = segs.filter((g) => g.here);
+  const mids = shown.map((g) => g.pA && g.pB ? [(g.pA[0] + g.pB[0]) / 2, (g.pA[1] + g.pB[1]) / 2] : g.pA).filter(Boolean);
   const centre = mids.length
     ? [mids.reduce((n, m) => n + m[0], 0) / mids.length, mids.reduce((n, m) => n + m[1], 0) / mids.length]
     : null;
   const col = dim.okColor || '#56b733';
   const label = dim.name || 'Dimension';
-
-  const startCurtain = (e) => {
-    e.preventDefault();
-    const move = (ev) => {
-      const r = svgRef.current.getBoundingClientRect();
-      setCurtain(Math.max(24, Math.min(476, (ev.clientX - r.left) * 500 / r.width)));
-    };
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
-  };
+  const layers = active ? [capById(active)] : caps.map(capById);
 
   return (
     <div className="canvas-wrap">
       <div className="frame">
-        <span className="flabel">MASTER IMAGE · {caps.map(capLabel).join(' + ')}</span>
-        {cross && (
+        <span className="flabel">MASTER IMAGE · {active ? capLabel(active) : caps.map(capLabel).join(' + ')}</span>
+        {multi && (
           <div className="canvasmodes">
-            {[['mosaic', 'Focus mosaic'], ['curtain', 'Curtain'], ['blend', 'Blend']].map(([k, l]) => (
-              <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{l}</button>
+            <button className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>Superposed</button>
+            {caps.map((cid) => (
+              <button key={cid} className={tab === cid ? 'on' : ''} onClick={() => setTab(cid)}>
+                <span className="cdot" style={{ background: capById(cid).tint }} />{capLabel(cid)}
+              </button>
             ))}
           </div>
         )}
-        <svg ref={svgRef} width="500" height="380" viewBox="0 0 500 380">
-          <defs>
-            {otherCaps.map((c) => (
-              <clipPath key={c.id} id={'mos-' + c.id}>
-                {patchesFor(c.id).map((r, i) => <rect key={i} x={r[0]} y={r[1]} width={r[2]} height={r[3]} rx="10" />)}
-              </clipPath>
-            ))}
-            <clipPath id="curtain-clip"><rect x={curtain} y="0" width={500 - curtain} height="380" /></clipPath>
-          </defs>
-
-          <CaptureRender cap={baseCap} pfx="base" />
-
-          {cross && mode === 'mosaic' && otherCaps.map((c) => (
-            <g key={c.id}>
-              <g clipPath={`url(#mos-${c.id})`}><CaptureRender cap={c} pfx={'mos' + c.id} /></g>
-              {patchesFor(c.id).map((r, i) => (
-                <g key={i}>
-                  <rect x={r[0]} y={r[1]} width={r[2]} height={r[3]} rx="10" fill="none"
-                    stroke={c.tint} strokeWidth="1.6" strokeDasharray="5 4" />
-                  <rect x={r[0]} y={r[1] - 15} width="52" height="14" rx="7" fill={c.tint} />
-                  <text x={r[0] + 26} y={r[1] - 7.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{c.name}</text>
-                </g>
-              ))}
+        <svg width="500" height="380" viewBox="0 0 500 380">
+          {/* superposed: equal-weight average of every capture (1, 1/2, 1/3 … stacks to equal parts) */}
+          {layers.map((c, i) => (
+            <g key={c.id} opacity={i === 0 ? 1 : 1 / (i + 1)}>
+              <CaptureRender cap={c} pfx={'lay' + c.id} />
             </g>
           ))}
 
-          {cross && mode === 'curtain' && (
-            <g>
-              <g clipPath="url(#curtain-clip)"><CaptureRender cap={swapCap} pfx="cur" /></g>
-              <line x1={curtain} y1="0" x2={curtain} y2="380" stroke="#fff" strokeWidth="1.5" opacity=".9" />
-              <g onPointerDown={startCurtain} style={{ cursor: 'ew-resize' }}>
-                <rect x={curtain - 11} y="176" width="22" height="28" rx="6" fill="#ffffffee" stroke="#9aa3ad" />
-                <text x={curtain} y="191" fontSize="11" fontWeight="800" fill="#3b434c" textAnchor="middle" dominantBaseline="middle">⇄</text>
-                <rect x={curtain - 14} y="0" width="28" height="380" fill="transparent" />
-              </g>
+          {/* extracted geometry — coloured by the capture that owns it; other captures kept faint */}
+          {usedShapes.map((sh, i) => (
+            <g key={'o' + i} opacity={!active || sh.captureId === active ? 1 : 0.28}>
+              {shapeOutline(sh, 'o' + i, multi ? capById(sh.captureId).tint : '#8b93a1')}
             </g>
-          )}
-
-          {cross && mode === 'blend' && <g opacity={blend}><CaptureRender cap={swapCap} pfx="bl" /></g>}
-
-          {/* extracted geometry — always on top, coloured by the capture that owns it */}
-          {usedShapes.map((sh, i) => shapeOutline(sh, 'o' + i, cross ? capById(sh.captureId).tint : '#8b93a1'))}
+          ))}
 
           {segs.map((g) => (
-            <g key={g.key}>
+            <g key={g.key} opacity={g.here ? 1 : 0.22}>
               {g.pA && g.pB && <line x1={g.pA[0]} y1={g.pA[1]} x2={g.pB[0]} y2={g.pB[1]} stroke={col} strokeWidth="2.4" />}
               {g.pA && <circle cx={g.pA[0]} cy={g.pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
               {g.pB && <circle cx={g.pB[0]} cy={g.pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
@@ -1830,16 +1792,19 @@ function DimensionCanvas({ dim, shapes }) {
               })()}
             </g>
           ))}
-          {cross && usedShapes.map((sh, i) => {
+
+          {/* which capture each endpoint came from */}
+          {multi && usedShapes.map((sh, i) => {
             const pt = featPoint(sh, '');
             const c = capById(sh.captureId);
             return (
-              <g key={'tag' + i}>
-                <rect x={pt[0] - 21} y={pt[1] + 9} width="42" height="14" rx="7" fill={c.tint} opacity=".95" />
+              <g key={'tag' + i} opacity={!active || sh.captureId === active ? 1 : 0.28}>
+                <rect x={pt[0] - 30} y={pt[1] + 9} width="60" height="14" rx="7" fill={c.tint} opacity=".95" />
                 <text x={pt[0]} y={pt[1] + 16.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{c.name}</text>
               </g>
             );
           })}
+
           {centre && (() => {
             const fs = dim.labelSize || 14, w = label.length * fs * 0.62 + 12, h = fs + 6, ry = centre[1] - 26 - h;
             return (
@@ -1851,22 +1816,15 @@ function DimensionCanvas({ dim, shapes }) {
           })()}
         </svg>
 
-        {cross && (
+        {multi && (
           <div className="caplegend">
-            {caps.map((cid) => (
-              <span key={cid} className="capchip" style={{ border: '1px solid ' + capById(cid).tint }}>
-                <span className="cd" style={{ background: capById(cid).tint }} />
-                {capById(cid).name}{baseCap.id === cid ? ' · base' : ''}
-              </span>
-            ))}
-            {otherCaps.length > 0 && <button className="swapbtn" onClick={() => { swapped.current = true; setBaseId(otherCaps[0].id); }}>⇄ Swap base</button>}
-          </div>
-        )}
-        {cross && mode === 'blend' && (
-          <div className="blendbar">
-            <span>{swapCap.name}</span>
-            <input type="range" min="0" max="1" step="0.05" value={blend} onChange={(e) => setBlend(Number(e.target.value))} />
-            <span>opacity</span>
+            {active
+              ? (shown.length > 0
+                  ? <span className="capnote">Showing <b>{capLabel(active)}</b> ·{' '}
+                      {shown.length} of {segs.length} {segs.length === 1 ? 'measurement' : 'measurements'} configured on it</span>
+                  : <span className="capnote">Showing <b>{capLabel(active)}</b> · every measurement here is taken
+                      <b> across captures</b>, so none sits wholly in it — see <b>Superposed</b></span>)
+              : <span className="capnote">All {caps.length} captures superposed at equal opacity — they should overlay almost exactly</span>}
           </div>
         )}
       </div>
@@ -2385,7 +2343,7 @@ function App() {
       <div className="topbar">
         <div className="brand">
           <span className="dot">F</span><span>Shape Extractor</span>
-          <span className="crumbs">&nbsp;·&nbsp; Recipe Management ▸ Variant A ▸ Cam 1 ▸ <b>Module Configuration</b></span>
+          <span className="crumbs">&nbsp;·&nbsp; Recipe Management ▸ Variant A ▸ Capture 1 ▸ <b>Module Configuration</b></span>
         </div>
         <div className="switch">
           <button className={view === 'vision' ? 'on' : ''} onClick={() => setView('vision')}><span className="pv">VISION</span> Module Configuration</button>
