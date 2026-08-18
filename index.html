@@ -198,8 +198,7 @@
   .feat .roinput{flex:1;}
   .feat .sel{flex:1;min-width:0;}
   .capline{display:flex;align-items:center;gap:7px;margin-bottom:7px;}
-  .capline .sel{flex:0 0 132px;}
-  .capline .cdims{font-size:10.5px;color:var(--muted);white-space:nowrap;}
+  .capline .sel{flex:1;}
   .xcap{display:inline-flex;align-items:center;gap:5px;background:#efe7ff;color:#5b21b6;border:1px solid #d9c9ff;
     border-radius:20px;padding:2px 9px;font-size:10px;font-weight:700;letter-spacing:.2px;}
   .xcap.sm{padding:1px 7px;font-size:9.5px;}
@@ -1981,7 +1980,6 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       <select className="sel" value={val} onChange={(e) => onCh(e.target.value)}>
         {opts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
-      <span className="cdims">{capDims(val)} px · {capById(val).focus}</span>
     </div>
   );
   const shapeSelect = (val, capId, onCh) => (
@@ -2004,24 +2002,24 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
           <select className="sel" value={angleMode} onChange={(e) => patch({ angleMode: e.target.value })}>{ANGLE_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
       </div>
       <div className="field">
-        <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'} <span className="sub">· capture › feature › point</span></span>
+        <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
         {captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
           {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
         </div>
-        {cfg.axis && oneIsPeak && <div className="hint">Peak is itself the point.</div>}
       </div>
       {twoFeatures && (
         <div className="field">
-          <span className="tinylab">Feature B {crossCapture && <span className="xcap sm">⇄ CROSS-CAPTURE</span>}</span>
+          <span className="tinylab">Feature B
+            <span className="eyehint" title={`Only captures of ${capDims(capA)} px — the same image dimensions as ${capLabel(capA)} — can be paired, so both features share one coordinate frame.`}><EyeIcon on={true} /></span>
+            {crossCapture && <span className="xcap sm">⇄ CROSS-CAPTURE</span>}</span>
           {captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
           <div className="feat">
             {shapeSelect(node.shapeTwoId, capB, (e) => changeShape('two', e.target.value))}
             {showSubB && <select className="sel" value={node.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{optsB.map((f) => <option key={f}>{f}</option>)}</select>}
           </div>
-          <div className="hint">Only captures of {capDims(capA)} px — the same image dimensions as {capLabel(capA)} — can be paired, so both features of this measurement share one coordinate frame.</div>
-          {cfg.axis && twoIsPeak && <div className="hint">Peak is itself the point.</div>}
+
           {crossPosition && (
             <div className="noteline">
               <span>⚠</span>
@@ -2102,22 +2100,10 @@ function DimensionForm({ draft, setDraft, shapes }) {
         </div>
       ))}
 
-      {compoundEligible(draft.type) ? (
+      {compoundEligible(draft.type) && (
         <button className="configlink" onClick={addTerm}>
           <span className="chev">＋</span> Compound dimension{isCompound ? ' · add another term' : ''}
         </button>
-      ) : (
-        <div className="hint" style={{ marginTop: 4 }}>
-          {cfg.name} cannot be combined with another dimension — only Distance, Length and Area can.
-        </div>
-      )}
-      {compoundEligible(draft.type) && (
-        <div className="hint" style={{ marginTop: 6 }}>
-          {fam === 'area'
-            ? 'An Area may only be combined with another Area.'
-            : 'Distance and Length may be combined in any order (L+L, D+D, L+D).'} Terms may come from
-          different captures — the values are combined after conversion to {FAMILY_UNIT[fam]}.
-        </div>
       )}
 
       {/* ---- name sits directly above ground truth ---- */}
@@ -2135,9 +2121,6 @@ function DimensionForm({ draft, setDraft, shapes }) {
           <div className="block-t" style={{ marginTop: 8 }}>Ground Truth
             {isCompound && <span className="xcap sm" style={{ marginLeft: 8 }}>ON THE COMBINED VALUE</span>}
             <span className="ln" /></div>
-          {isCompound && <div className="hint" style={{ marginBottom: 8 }}>
-            Applied once, to the result of the formula above. The individual terms have no ground truth
-            and produce no pass/fail of their own.</div>}
           <div className="gtgrid">
             <div><span className="tinylab">Operator</span>
               <select className="sel" value={draft.operator} onChange={(e) => patch({ operator: Number(e.target.value) })}><option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option></select></div>
@@ -2149,7 +2132,6 @@ function DimensionForm({ draft, setDraft, shapes }) {
                 : <select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select>}
             </div>
           </div>
-          {isCompound && <div className="hint">Unit is fixed by the family being combined.</div>}
           {draft.type !== 1 && (
             <div className="field" style={{ marginTop: 10 }}>
               <span className="tinylab">Ratio (pixel to mm){caps.length > 1 ? ' · per capture' : ''}</span>
@@ -2167,7 +2149,6 @@ function DimensionForm({ draft, setDraft, shapes }) {
               ) : (
                 <input className="inp" type="number" min="0" step="0.001" value={draft.ratio} onChange={(e) => patch({ ratio: Math.max(0, Number(e.target.value)) })} />
               )}
-              {caps.length > 1 && <div className="hint">Each capture converts its own pixels before the terms are combined.</div>}
             </div>
           )}
         </>
@@ -2194,11 +2175,7 @@ function DimensionForm({ draft, setDraft, shapes }) {
           {LABEL_SIZE_OPTS.map((o) => <option key={o.px} value={o.px}>{o.n}</option>)}
         </select>
       </div>
-      <div className="hint">{isCompound
-        ? `At inference every term is drawn, each marked with its operator, and the combined value is labelled “${draft.name}” once — in the OK colour when in-spec and the NG colour when out of tolerance.`
-        : cfg.gt
-          ? `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.`
-          : `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the colour set above (${cfg.name} has no ground truth, so there is no OK/NG state).`}</div>
+
     </div>
   );
 }
