@@ -219,6 +219,20 @@
   .blendbar{position:absolute;bottom:8px;right:8px;z-index:7;display:flex;align-items:center;gap:7px;
     background:#ffffffee;border:1px solid var(--line);border-radius:7px;padding:4px 9px;font-size:10px;font-weight:700;color:var(--muted);}
   .blendbar input[type=range]{width:96px;}
+  .formula{display:flex;gap:9px;align-items:flex-start;background:var(--hdr);border:1px solid var(--line);
+    border-radius:8px;padding:9px 11px;margin-bottom:14px;font-size:11.5px;line-height:1.65;}
+  .formula .fk{font-weight:800;color:var(--orange);font-size:13px;line-height:1.35;}
+  .formula .fx{color:var(--muted);}
+  .formula .fx b{color:var(--ink);font-weight:700;}
+  .formula .op{display:inline-block;margin:0 6px;font-weight:800;color:var(--orange);}
+  .term{border:1px solid var(--line);border-left:3px solid var(--orange);border-radius:8px;margin:12px 0;background:#fbfbfc;}
+  .term-hd{display:flex;align-items:center;gap:9px;padding:8px 10px;border-bottom:1px solid var(--line);}
+  .term-hd .tt{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+  .term-hd .del{margin-left:auto;color:var(--muted);cursor:pointer;display:inline-flex;}
+  .term-hd .del:hover{color:var(--red);}
+  .opsel{font-size:11.5px;font-weight:700;border:1px solid var(--line-d);border-radius:6px;padding:3px 6px;background:#fff;color:var(--ink);}
+  .term-bd{padding:10px;}
+  .ratiogrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:9px;}
   .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:16px;line-height:1.45;}
   .banner.warn{background:#fdECe8;color:#b8341f;border:1px solid #f3c4b8;}
   .banner.ok{background:#eef7ea;color:var(--green-d);border:1px solid #cdeabf;}
@@ -1401,17 +1415,14 @@ function typeDefaults(type, shapes, prefCapture) {
     unit: cfg.unit,
   };
 }
-// true when the two features come from different captures
-const isCrossCapture = (d) => {
-  const cfg = DIM_TYPE_CFG[d.type];
-  const two = cfg.linePick ? (d.angleMode || 'two features') === 'two features' : cfg.two;
-  return !!(two && d.captureTwoId && d.captureOneId !== d.captureTwoId);
-};
+// true when a dimension draws on more than one capture — across all of its terms
+const isCrossCapture = (d) => capturesUsed(d).length > 1;
 function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: DIM_TYPE_CFG[2].name + '_' + n,
     type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05,
+    terms: [],                                 // compound terms; empty = a plain single dimension
+    operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05, ratios: {},
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
   };
@@ -1680,38 +1691,58 @@ function shapeOutline(s, key, colour) {
 }
 
 // Canvas preview of the dimension being authored.
-// The two captures are pixel-aligned (identical image dimensions enforced on the dropdown), so a
-// feature from one capture sits at the SAME coordinates on the other. Three ways to look at that:
-//   • Focus mosaic (default) — base capture's pixels, with the other capture's pixels patched into
-//     its own feature's ROI, so every feature is shown by the capture that actually resolves it.
-//   • Curtain — free-form swipe between the two captures.
-//   • Blend — cross-fade; its job is to prove the two captures really are the same view.
+// Captures paired inside one term are pixel-aligned (identical image dimensions is enforced on the
+// dropdown), so a feature from one sits at the SAME coordinates on the other. Three ways to look at it:
+//   • Focus mosaic (default) — base capture's pixels, with each other capture's pixels patched into the
+//     ROIs of the features it owns, so every feature is shown by the capture that actually resolves it.
+//   • Curtain — free-form swipe between two captures.
+//   • Blend — cross-fade; its job is to prove the captures really are the same view.
+// A compound dimension draws every term, each marked with its operator, under one combined label.
 function DimensionCanvas({ dim, shapes }) {
-  const cfg = DIM_TYPE_CFG[dim.type];
-  const two = dim.type === 1 ? (dim.angleMode || 'two features') === 'two features' : cfg.two;
-  const sA = shapes.find((s) => s.id === dim.shapeOneId);
-  const sB = two ? shapes.find((s) => s.id === dim.shapeTwoId) : null;
-  const capAId = (sA || {}).captureId || dim.captureOneId || CAPTURES[0].id;
-  const capBId = (sB || {}).captureId || dim.captureTwoId || capAId;
-  const cross = !!(sB && capAId !== capBId);
+  const byId = (id) => shapes.find((s) => s.id === id);
+  const terms = allTerms(dim);
+  const caps = capturesUsed(dim);
+  const cross = caps.length > 1;
 
   const [mode, setMode] = useState('mosaic');
-  const [baseId, setBaseId] = useState(capAId);
+  const [baseId, setBaseId] = useState(caps[0]);
   const [curtain, setCurtain] = useState(250);
   const [blend, setBlend] = useState(0.55);
   const svgRef = useRef(null);
-  useEffect(() => { setBaseId(capAId); }, [capAId, capBId]);
+  useEffect(() => { if (!caps.includes(baseId)) setBaseId(caps[0]); }, [caps.join('|')]);
 
-  const baseCap = capById(cross ? baseId : capAId);
-  const otherCap = capById(baseCap.id === capAId ? capBId : capAId);
-  // the feature that does NOT come from the base capture — its ROI is the mosaic patch
-  const patchShape = baseCap.id === capAId ? sB : sA;
-  const patch = cross && patchShape ? padBox(shapeBBox(patchShape), 24) : null;
+  const baseCap = capById(caps.includes(baseId) ? baseId : caps[0]);
+  const otherCaps = caps.filter((c) => c !== baseCap.id).map(capById);
+  const swapCap = otherCaps[0] || baseCap;   // curtain / blend compare against the first other capture
 
+  // every shape a term touches, tagged with the capture that owns it
+  const usedShapes = [];
+  terms.forEach((t) => {
+    const cfg = DIM_TYPE_CFG[t.type];
+    const two = cfg.linePick ? (t.angleMode || 'two features') === 'two features' : cfg.two;
+    [t.shapeOneId, two ? t.shapeTwoId : null].forEach((id) => {
+      const sh = id && byId(id);
+      if (sh && !usedShapes.some((u) => u.id === sh.id)) usedShapes.push(sh);
+    });
+  });
+  const patchesFor = (capId) => usedShapes.filter((sh) => sh.captureId === capId).map((sh) => padBox(shapeBBox(sh), 24));
+
+  // one drawable segment per term
+  const segs = terms.map((t, i) => {
+    const cfg = DIM_TYPE_CFG[t.type];
+    const two = cfg.linePick ? (t.angleMode || 'two features') === 'two features' : cfg.two;
+    const sA = byId(t.shapeOneId), sB = two ? byId(t.shapeTwoId) : null;
+    return {
+      key: t.id || 'base', op: i === 0 ? null : t.op, type: cfg.name,
+      pA: sA ? featPoint(sA, t.shapeOneSelector) : null,
+      pB: sB ? featPoint(sB, t.shapeTwoSelector) : null,
+    };
+  });
+  const mids = segs.map((g) => g.pA && g.pB ? [(g.pA[0] + g.pB[0]) / 2, (g.pA[1] + g.pB[1]) / 2] : g.pA).filter(Boolean);
+  const centre = mids.length
+    ? [mids.reduce((n, m) => n + m[0], 0) / mids.length, mids.reduce((n, m) => n + m[1], 0) / mids.length]
+    : null;
   const col = dim.okColor || '#56b733';
-  const pA = sA ? featPoint(sA, dim.shapeOneSelector) : null;
-  const pB = sB ? featPoint(sB, dim.shapeTwoSelector) : null;
-  const mid = pA && pB ? [(pA[0] + pB[0]) / 2, (pA[1] + pB[1]) / 2] : pA;
   const label = dim.name || 'Dimension';
 
   const startCurtain = (e) => {
@@ -1724,17 +1755,10 @@ function DimensionCanvas({ dim, shapes }) {
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
 
-  const featTag = (pt, cap, key) => pt && (
-    <g key={key}>
-      <rect x={pt[0] - 21} y={pt[1] + 9} width="42" height="14" rx="7" fill={cap.tint} opacity=".95" />
-      <text x={pt[0]} y={pt[1] + 16.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{cap.name}</text>
-    </g>
-  );
-
   return (
     <div className="canvas-wrap">
       <div className="frame">
-        <span className="flabel">MASTER IMAGE · {cross ? `${capById(capAId).name} + ${capById(capBId).name}` : baseCap.name}</span>
+        <span className="flabel">MASTER IMAGE · {caps.map(capLabel).join(' + ')}</span>
         {cross && (
           <div className="canvasmodes">
             {[['mosaic', 'Focus mosaic'], ['curtain', 'Curtain'], ['blend', 'Blend']].map(([k, l]) => (
@@ -1744,25 +1768,33 @@ function DimensionCanvas({ dim, shapes }) {
         )}
         <svg ref={svgRef} width="500" height="380" viewBox="0 0 500 380">
           <defs>
-            {patch && <clipPath id="mosaic-clip"><rect x={patch[0]} y={patch[1]} width={patch[2]} height={patch[3]} rx="10" /></clipPath>}
+            {otherCaps.map((c) => (
+              <clipPath key={c.id} id={'mos-' + c.id}>
+                {patchesFor(c.id).map((r, i) => <rect key={i} x={r[0]} y={r[1]} width={r[2]} height={r[3]} rx="10" />)}
+              </clipPath>
+            ))}
             <clipPath id="curtain-clip"><rect x={curtain} y="0" width={500 - curtain} height="380" /></clipPath>
           </defs>
 
           <CaptureRender cap={baseCap} pfx="base" />
 
-          {cross && mode === 'mosaic' && patch && (
-            <g>
-              <g clipPath="url(#mosaic-clip)"><CaptureRender cap={otherCap} pfx="mos" /></g>
-              <rect x={patch[0]} y={patch[1]} width={patch[2]} height={patch[3]} rx="10" fill="none"
-                stroke={otherCap.tint} strokeWidth="1.6" strokeDasharray="5 4" />
-              <rect x={patch[0]} y={patch[1] - 15} width="52" height="14" rx="7" fill={otherCap.tint} />
-              <text x={patch[0] + 26} y={patch[1] - 7.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{otherCap.name}</text>
+          {cross && mode === 'mosaic' && otherCaps.map((c) => (
+            <g key={c.id}>
+              <g clipPath={`url(#mos-${c.id})`}><CaptureRender cap={c} pfx={'mos' + c.id} /></g>
+              {patchesFor(c.id).map((r, i) => (
+                <g key={i}>
+                  <rect x={r[0]} y={r[1]} width={r[2]} height={r[3]} rx="10" fill="none"
+                    stroke={c.tint} strokeWidth="1.6" strokeDasharray="5 4" />
+                  <rect x={r[0]} y={r[1] - 15} width="52" height="14" rx="7" fill={c.tint} />
+                  <text x={r[0] + 26} y={r[1] - 7.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{c.name}</text>
+                </g>
+              ))}
             </g>
-          )}
+          ))}
 
           {cross && mode === 'curtain' && (
             <g>
-              <g clipPath="url(#curtain-clip)"><CaptureRender cap={otherCap} pfx="cur" /></g>
+              <g clipPath="url(#curtain-clip)"><CaptureRender cap={swapCap} pfx="cur" /></g>
               <line x1={curtain} y1="0" x2={curtain} y2="380" stroke="#fff" strokeWidth="1.5" opacity=".9" />
               <g onPointerDown={startCurtain} style={{ cursor: 'ew-resize' }}>
                 <rect x={curtain - 11} y="176" width="22" height="28" rx="6" fill="#ffffffee" stroke="#9aa3ad" />
@@ -1772,43 +1804,62 @@ function DimensionCanvas({ dim, shapes }) {
             </g>
           )}
 
-          {cross && mode === 'blend' && <g opacity={blend}><CaptureRender cap={otherCap} pfx="bl" /></g>}
+          {cross && mode === 'blend' && <g opacity={blend}><CaptureRender cap={swapCap} pfx="bl" /></g>}
 
-          {/* extracted geometry — always on top, coloured by its owning capture */}
-          {shapeOutline(sA, 'a', cross ? capById(capAId).tint : '#8b93a1')}
-          {shapeOutline(sB, 'b', cross ? capById(capBId).tint : '#8b93a1')}
-          {pA && pB && <line x1={pA[0]} y1={pA[1]} x2={pB[0]} y2={pB[1]} stroke={col} strokeWidth="2.4" />}
-          {pA && <circle cx={pA[0]} cy={pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
-          {pB && <circle cx={pB[0]} cy={pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
-          {cross && featTag(pA, capById(capAId), 'ta')}
-          {cross && featTag(pB, capById(capBId), 'tb')}
-          {mid && (() => {
-            const fs = dim.labelSize || 14, w = label.length * fs * 0.62 + 12, h = fs + 6, ry = mid[1] - 10 - h;
+          {/* extracted geometry — always on top, coloured by the capture that owns it */}
+          {usedShapes.map((sh, i) => shapeOutline(sh, 'o' + i, cross ? capById(sh.captureId).tint : '#8b93a1'))}
+
+          {segs.map((g) => (
+            <g key={g.key}>
+              {g.pA && g.pB && <line x1={g.pA[0]} y1={g.pA[1]} x2={g.pB[0]} y2={g.pB[1]} stroke={col} strokeWidth="2.4" />}
+              {g.pA && <circle cx={g.pA[0]} cy={g.pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
+              {g.pB && <circle cx={g.pB[0]} cy={g.pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
+              {g.op && g.pA && g.pB && (() => {
+                const mx = (g.pA[0] + g.pB[0]) / 2, my = (g.pA[1] + g.pB[1]) / 2;
+                return (
+                  <g>
+                    <circle cx={mx} cy={my} r="9" fill="#fff" stroke={col} strokeWidth="1.8" />
+                    <text x={mx} y={my + 0.5} fontSize="12" fontWeight="800" fill={col} textAnchor="middle" dominantBaseline="middle">{g.op}</text>
+                  </g>
+                );
+              })()}
+            </g>
+          ))}
+          {cross && usedShapes.map((sh, i) => {
+            const pt = featPoint(sh, '');
+            const c = capById(sh.captureId);
+            return (
+              <g key={'tag' + i}>
+                <rect x={pt[0] - 21} y={pt[1] + 9} width="42" height="14" rx="7" fill={c.tint} opacity=".95" />
+                <text x={pt[0]} y={pt[1] + 16.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{c.name}</text>
+              </g>
+            );
+          })}
+          {centre && (() => {
+            const fs = dim.labelSize || 14, w = label.length * fs * 0.62 + 12, h = fs + 6, ry = centre[1] - 26 - h;
             return (
               <g>
-                <rect x={mid[0] - w / 2} y={ry} width={w} height={h} rx="4" fill={col} />
-                <text x={mid[0]} y={ry + h / 2 + 1} fill="#fff" fontSize={fs} fontWeight="700" textAnchor="middle" dominantBaseline="middle">{label}</text>
+                <rect x={centre[0] - w / 2} y={ry} width={w} height={h} rx="4" fill={col} />
+                <text x={centre[0]} y={ry + h / 2 + 1} fill="#fff" fontSize={fs} fontWeight="700" textAnchor="middle" dominantBaseline="middle">{label}</text>
               </g>
             );
           })()}
-          {!two && pA && <text x={pA[0]} y={pA[1] + 18} fill={col} fontSize="10" fontWeight="700" textAnchor="middle">{cfg.name}</text>}
         </svg>
 
         {cross && (
           <div className="caplegend">
-            {[capAId, capBId].map((cid, i) => (
-              <span key={cid + i} className="capchip" style={{ border: '1px solid ' + capById(cid).tint }}>
+            {caps.map((cid) => (
+              <span key={cid} className="capchip" style={{ border: '1px solid ' + capById(cid).tint }}>
                 <span className="cd" style={{ background: capById(cid).tint }} />
                 {capById(cid).name}{baseCap.id === cid ? ' · base' : ''}
-                <span style={{ fontWeight: 500, color: 'var(--muted)' }}>{capById(cid).focus.replace('focused on the ', '')}</span>
               </span>
             ))}
-            <button className="swapbtn" onClick={() => setBaseId(baseCap.id === capAId ? capBId : capAId)}>⇄ Swap base</button>
+            {otherCaps.length > 0 && <button className="swapbtn" onClick={() => setBaseId(otherCaps[0].id)}>⇄ Swap base</button>}
           </div>
         )}
         {cross && mode === 'blend' && (
           <div className="blendbar">
-            <span>{otherCap.name}</span>
+            <span>{swapCap.name}</span>
             <input type="range" min="0" max="1" step="0.05" value={blend} onChange={(e) => setBlend(Number(e.target.value))} />
             <span>opacity</span>
           </div>
@@ -1818,65 +1869,93 @@ function DimensionCanvas({ dim, shapes }) {
   );
 }
 
-// single-dimension config form (used in the Add/Edit sub-page)
-function DimensionForm({ draft, setDraft, shapes }) {
-  const cfg = DIM_TYPE_CFG[draft.type];
-  const patch = (p) => setDraft({ ...draft, ...p });
-  // 0d points a shape exposes (Peak is itself the point → none to pick).
-  // Angle sub-mode: measure one feature against an axis, or between two features.
-  const angleMode = draft.angleMode || 'two features';
+/* ================= COMPOUND DIMENSIONS =================
+   A dimension is a SUM OF TERMS. A plain dimension has one term (held on the draft itself);
+   a compound adds further terms in `draft.terms`, each with a + or − operator.
+   Only + and − are offered, so left-to-right evaluation is exact — no precedence rules needed.
+   Families: a compound may only mix types that produce the same kind of quantity.
+     linear = Distance + Length (L+L, D+D, L+D)      area = Area only
+   Angle, Convexity and Contour Continuity are never compoundable. */
+const DIM_FAMILY = { 2: 'linear', 4: 'linear', 3: 'area' };
+const familyOf = (type) => DIM_FAMILY[type] || null;
+const compoundEligible = (type) => !!familyOf(type);
+const typesInFamily = (fam) => Object.keys(DIM_FAMILY).filter((t) => DIM_FAMILY[t] === fam).map(Number);
+const FAMILY_UNIT = { linear: 'mm', area: 'mm²' };
+const allTerms = (d) => [d, ...(d.terms || [])];
+// every capture a dimension touches, across all of its terms
+const capturesUsed = (d) => {
+  const out = new Set();
+  allTerms(d).forEach((t) => {
+    const cfg = DIM_TYPE_CFG[t.type];
+    const two = cfg.linePick ? (t.angleMode || 'two features') === 'two features' : cfg.two;
+    if (t.captureOneId) out.add(t.captureOneId);
+    if (two && t.captureTwoId) out.add(t.captureTwoId);
+  });
+  return [...out];
+};
+function makeTerm(type, shapes, prefCapture) {
+  return {
+    id: 'trm_' + Math.floor(rnd() * 1e6), op: '+', type,
+    distanceAxis: 'euclidean', angleMode: 'two features',
+    ...typeDefaults(type, shapes, prefCapture),
+  };
+}
+// short human label for one term, used in the formula strip and the list table
+function termLabel(t, shapes) {
+  const nm = (id) => (shapes.find((x) => x.id === id) || {}).name || '—';
+  const cfg = DIM_TYPE_CFG[t.type];
+  const two = cfg.linePick ? (t.angleMode || 'two features') === 'two features' : cfg.two;
+  const a = nm(t.shapeOneId) + (t.shapeOneSelector ? ' · ' + t.shapeOneSelector : '');
+  return two ? `${a} → ${nm(t.shapeTwoId)}${t.shapeTwoSelector ? ' · ' + t.shapeTwoSelector : ''}` : a;
+}
+
+/* One Capture → Feature → Point cascade. Rendered for the base term and for every compound term. */
+function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
+  const cfg = DIM_TYPE_CFG[node.type];
+  const angleMode = node.angleMode || 'two features';
   const twoFeatures = cfg.linePick ? angleMode === 'two features' : cfg.two;
-  const oneShape = shapes.find((x) => x.id === draft.shapeOneId);
-  const twoShape = shapes.find((x) => x.id === draft.shapeTwoId);
+  const oneShape = shapes.find((x) => x.id === node.shapeOneId);
+  const twoShape = shapes.find((x) => x.id === node.shapeTwoId);
   const oneIsPeak = (oneShape || {}).type === 'peak';
   const twoIsPeak = (twoShape || {}).type === 'peak';
-  const twoIsLine = (twoShape || {}).type === 'line';
-  // Base per-feature sub-dropdown: Length→scalar keys, Angle→line features, Distance→0d points.
+  const oneIsLine = (oneShape || {}).type === 'line';
   const subOptsFor = (id) => {
     const s = shapes.find((x) => x.id === id); if (!s) return [];
     if (cfg.keyPick) return SHAPE_KEYS[s.type] || [];
     if (cfg.linePick) return (SHAPE_FEATURES[s.type] || {}).lines || [];
-    if (cfg.axis && s.type !== 'peak') return (SHAPE_FEATURES[s.type] || {}).points || [];   // Distance → 0d points
+    if (cfg.axis && s.type !== 'peak') return (SHAPE_FEATURES[s.type] || {}).points || [];
     return [];
   };
-  // Feature B (Distance) also offers derived measurements from Feature A's point.
   const optsB = (() => {
-    const base = subOptsFor(draft.shapeTwoId);
-    if (!cfg.axis || twoIsPeak) return base;                          // Distance only; peak B has no dropdown
-    const extra = [];
-    if (twoIsLine) extra.push('perpendicular on the line');   // perpendicular from Feature A's point onto Feature B's line (extended line always considered)
+    const base = subOptsFor(node.shapeTwoId);
+    if (!cfg.axis || twoIsPeak) return base;
+    const extra = ['nearest from previous point'];
+    if (oneIsLine) extra.push('perpendicular from previous point');
     return [...base, ...extra];
   })();
-  const showSubA = (() => { const o = subOptsFor(draft.shapeOneId); return cfg.linePick ? o.length > 1 : o.length > 0; })();
-  const showSubB = cfg.linePick ? (subOptsFor(draft.shapeTwoId).length > 1) : (optsB.length > 0);
+  const showSubA = (() => { const o = subOptsFor(node.shapeOneId); return cfg.linePick ? o.length > 1 : o.length > 0; })();
+  const showSubB = cfg.linePick ? (subOptsFor(node.shapeTwoId).length > 1) : (optsB.length > 0);
   const defSel = (id) => subOptsFor(id)[0] || '';
-  // Dimension name = <TypeName>_<suffix>; the prefix is locked to the current type and follows type changes.
-  const namePrefix = cfg.name + '_';
-  const nameSuffix = draft.name.startsWith(namePrefix) ? draft.name.slice(namePrefix.length) : draft.name;
-  const changeType = (type) => patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix, ...typeDefaults(type, shapes, draft.captureOneId) });
 
-  /* ---- Capture → Feature → Point cascade ----------------------------------
-     Feature A may sit in any capture of the variant. Feature B is restricted to captures
-     with IDENTICAL image dimensions, so the two features share one coordinate frame. */
-  const capA = draft.captureOneId || (CAPTURES[0] || {}).id;
-  const capB = draft.captureTwoId || capA;
-  const shapesIn = (capId) => shapes.filter((s) => s.captureId === capId && shapeQualifies(s, draft.type));
+  const capA = node.captureOneId || (CAPTURES[0] || {}).id;
+  const capB = node.captureTwoId || capA;
+  const shapesIn = (capId) => shapes.filter((s) => s.captureId === capId && shapeQualifies(s, node.type));
   const capOptsA = CAPTURES.filter((c) => shapesIn(c.id).length > 0);
+  // pairing rule is WITHIN a term: the two features of one measurement must share a coordinate frame
   const capOptsB = sameDimCaptures(capA).filter((c) => shapesIn(c.id).length > 0);
   const crossCapture = twoFeatures && capA !== capB;
   const crossPosition = crossCapture && capById(capA).pos !== capById(capB).pos;
 
   const seedFeature = (which, capId) => {
     const list = shapesIn(capId);
-    const taken = which === 'two' ? draft.shapeOneId : draft.shapeTwoId;
+    const taken = which === 'two' ? node.shapeOneId : node.shapeTwoId;
     const s0 = (capId === (which === 'two' ? capA : capB) ? list.find((x) => x.id !== taken) : null) || list[0];
     return which === 'one'
-      ? { captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, draft.type) }
-      : { captureTwoId: capId, shapeTwoId: s0 ? s0.id : '', shapeTwoSelector: defaultSelector(s0, draft.type) };
+      ? { captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, node.type) }
+      : { captureTwoId: capId, shapeTwoId: s0 ? s0.id : '', shapeTwoSelector: defaultSelector(s0, node.type) };
   };
   const changeCaptureA = (capId) => {
     const next = seedFeature('one', capId);
-    // if B's capture is no longer pairable with A's, snap B back into A's capture
     const bStillValid = sameDimCaptures(capId).some((c) => c.id === capB) && shapesIn(capB).length > 0;
     patch({ ...next, ...(twoFeatures && !bStillValid ? seedFeature('two', capId) : {}) });
   };
@@ -1897,16 +1976,17 @@ function DimensionForm({ draft, setDraft, shapes }) {
       {shapesIn(capId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
     </select>
   );
+
   return (
-    <div style={{ padding: '4px 2px' }}>
+    <div>
       <div className="row3 field">
-        <div><span className="tinylab">Type</span>
-          <select className="sel" value={draft.type} onChange={(e) => changeType(Number(e.target.value))}>
-            {DIM_TYPE_OPTS.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
+        {typeOpts && <div><span className="tinylab">Type</span>
+          <select className="sel" value={node.type} onChange={(e) => onType(Number(e.target.value))}>
+            {typeOpts.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
           </select>
-        </div>
+        </div>}
         {cfg.axis && <div><span className="tinylab">Distance Axis</span>
-          <select className="sel" value={draft.distanceAxis} onChange={(e) => patch({ distanceAxis: e.target.value })}>{DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
+          <select className="sel" value={node.distanceAxis} onChange={(e) => patch({ distanceAxis: e.target.value })}>{DIST_AXIS_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
         {cfg.linePick && <div><span className="tinylab">Angle from</span>
           <select className="sel" value={angleMode} onChange={(e) => patch({ angleMode: e.target.value })}>{ANGLE_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
       </div>
@@ -1914,8 +1994,8 @@ function DimensionForm({ draft, setDraft, shapes }) {
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'} <span className="sub">· capture › feature › point</span></span>
         {captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
-          {shapeSelect(draft.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
-          {showSubA && <select className="sel" value={draft.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(draft.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
+          {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
+          {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
         </div>
         {cfg.axis && oneIsPeak && <div className="hint">Peak is itself the point.</div>}
       </div>
@@ -1924,10 +2004,10 @@ function DimensionForm({ draft, setDraft, shapes }) {
           <span className="tinylab">Feature B {crossCapture && <span className="xcap sm">⇄ CROSS-CAPTURE</span>}</span>
           {captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
           <div className="feat">
-            {shapeSelect(draft.shapeTwoId, capB, (e) => changeShape('two', e.target.value))}
-            {showSubB && <select className="sel" value={draft.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{optsB.map((f) => <option key={f}>{f}</option>)}</select>}
+            {shapeSelect(node.shapeTwoId, capB, (e) => changeShape('two', e.target.value))}
+            {showSubB && <select className="sel" value={node.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{optsB.map((f) => <option key={f}>{f}</option>)}</select>}
           </div>
-          <div className="hint">Only captures of {capDims(capA)} px — the same image dimensions as {capLabel(capA)} — can be paired, so both features share one coordinate frame.</div>
+          <div className="hint">Only captures of {capDims(capA)} px — the same image dimensions as {capLabel(capA)} — can be paired, so both features of this measurement share one coordinate frame.</div>
           {cfg.axis && twoIsPeak && <div className="hint">Peak is itself the point.</div>}
           {crossPosition && (
             <div className="noteline">
@@ -1939,24 +2019,147 @@ function DimensionForm({ draft, setDraft, shapes }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Dimension config form — one base term, optional compound terms, then name and ground truth.
+function DimensionForm({ draft, setDraft, shapes }) {
+  const cfg = DIM_TYPE_CFG[draft.type];
+  const patch = (p) => setDraft({ ...draft, ...p });
+  const terms = draft.terms || [];
+  const fam = familyOf(draft.type);
+  const isCompound = terms.length > 0;
+  const namePrefix = cfg.name + '_';
+  const nameSuffix = draft.name.startsWith(namePrefix) ? draft.name.slice(namePrefix.length) : draft.name;
+
+  // Changing the base type re-seeds it; if the new type cannot compound, every extra term is dropped.
+  const changeType = (type) => {
+    const keep = familyOf(type) === fam ? terms : [];
+    patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix, terms: keep,
+      unit: keep.length ? FAMILY_UNIT[familyOf(type)] : DIM_TYPE_CFG[type].unit,
+      ...typeDefaults(type, shapes, draft.captureOneId) });
+  };
+  const patchTerm = (id, p) => patch({ terms: terms.map((t) => t.id === id ? { ...t, ...p } : t) });
+  const addTerm = () => {
+    const t = makeTerm(draft.type, shapes, draft.captureOneId);
+    patch({ terms: [...terms, t], unit: FAMILY_UNIT[fam] });
+  };
+  const removeTerm = (id) => {
+    const next = terms.filter((t) => t.id !== id);
+    patch({ terms: next, unit: next.length ? FAMILY_UNIT[fam] : cfg.unit });
+  };
+  const changeTermType = (id, type) => patchTerm(id, { type, ...typeDefaults(type, shapes, draft.captureOneId) });
+  const famTypeOpts = fam ? DIM_TYPE_OPTS.filter((o) => familyOf(o.v) === fam) : [];
+  const caps = capturesUsed(draft);
+
+  return (
+    <div style={{ padding: '4px 2px' }}>
+      {isCompound && (
+        <div className="formula">
+          <span className="fk">Σ</span>
+          <span className="fx">
+            <b>{cfg.name}</b> <span>({termLabel(draft, shapes)})</span>
+            {terms.map((t) => (
+              <Fragment key={t.id}>
+                <span className="op">{t.op}</span>
+                <b>{DIM_TYPE_CFG[t.type].name}</b> <span>({termLabel(t, shapes)})</span>
+              </Fragment>
+            ))}
+          </span>
+        </div>
+      )}
+
+      <FeatureCascade node={draft} patch={patch} shapes={shapes} typeOpts={DIM_TYPE_OPTS} onType={changeType} />
+
+      {/* ---- compound terms ---- */}
+      {terms.map((t, i) => (
+        <div className="term" key={t.id}>
+          <div className="term-hd">
+            <select className="opsel" value={t.op} onChange={(e) => patchTerm(t.id, { op: e.target.value })}>
+              <option value="+">＋ add</option><option value="−">− subtract</option>
+            </select>
+            <span className="tt">Term {i + 2}</span>
+            <span className="del" title="Remove term" onClick={() => removeTerm(t.id)}><TrashIcon /></span>
+          </div>
+          <div className="term-bd">
+            <FeatureCascade node={t} patch={(p) => patchTerm(t.id, p)} shapes={shapes}
+              typeOpts={famTypeOpts} onType={(ty) => changeTermType(t.id, ty)} />
+          </div>
+        </div>
+      ))}
+
+      {compoundEligible(draft.type) ? (
+        <button className="configlink" onClick={addTerm}>
+          <span className="chev">＋</span> Compound dimension{isCompound ? ' · add another term' : ''}
+        </button>
+      ) : (
+        <div className="hint" style={{ marginTop: 4 }}>
+          {cfg.name} cannot be combined with another dimension — only Distance, Length and Area can.
+        </div>
+      )}
+      {compoundEligible(draft.type) && (
+        <div className="hint" style={{ marginTop: 6 }}>
+          {fam === 'area'
+            ? 'An Area may only be combined with another Area.'
+            : 'Distance and Length may be combined in any order (L+L, D+D, L+D).'} Terms may come from
+          different captures — the values are combined after conversion to {FAMILY_UNIT[fam]}.
+        </div>
+      )}
+
+      {/* ---- name sits directly above ground truth ---- */}
+      <div className="block-t" style={{ marginTop: 12 }}>Dimension Name <span className="ln" /></div>
+      <div className="field">
+        <span className="namewrap">
+          <span className="nameprefix">{cfg.name}_</span>
+          <input className="nameinput" type="text" value={nameSuffix} placeholder="1"
+            onChange={(e) => patch({ name: cfg.name + '_' + e.target.value.replace(/\s+/g, '') })} />
+        </span>
+      </div>
+
       {cfg.gt && (
         <>
-          <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
+          <div className="block-t" style={{ marginTop: 8 }}>Ground Truth
+            {isCompound && <span className="xcap sm" style={{ marginLeft: 8 }}>ON THE COMBINED VALUE</span>}
+            <span className="ln" /></div>
+          {isCompound && <div className="hint" style={{ marginBottom: 8 }}>
+            Applied once, to the result of the formula above. The individual terms have no ground truth
+            and produce no pass/fail of their own.</div>}
           <div className="gtgrid">
             <div><span className="tinylab">Operator</span>
               <select className="sel" value={draft.operator} onChange={(e) => patch({ operator: Number(e.target.value) })}><option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option></select></div>
             <div><span className="tinylab">Value</span><input className="inp" type="number" min="0" value={draft.targetValue} onChange={(e) => patch({ targetValue: Math.max(0, Number(e.target.value)) })} /></div>
             <div><span className="tinylab">Tolerance</span><input className="inp" type="number" min="0" value={draft.tolerance} onChange={(e) => patch({ tolerance: Math.max(0, Number(e.target.value)) })} /></div>
-            <div><span className="tinylab">Unit</span><select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select></div>
+            <div><span className="tinylab">Unit</span>
+              {isCompound
+                ? <input className="inp" value={FAMILY_UNIT[fam]} disabled readOnly />
+                : <select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select>}
+            </div>
           </div>
+          {isCompound && <div className="hint">Unit is fixed by the family being combined.</div>}
           {draft.type !== 1 && (
             <div className="field" style={{ marginTop: 10 }}>
-              <span className="tinylab">Ratio (pixel to mm)</span>
-              <input className="inp" type="number" min="0" step="0.001" value={draft.ratio} onChange={(e) => patch({ ratio: Math.max(0, Number(e.target.value)) })} />
+              <span className="tinylab">Ratio (pixel to mm){caps.length > 1 ? ' · per capture' : ''}</span>
+              {caps.length > 1 ? (
+                <div className="ratiogrid">
+                  {caps.map((cid) => (
+                    <div key={cid}>
+                      <span className="tinylab">{capLabel(cid)}</span>
+                      <input className="inp" type="number" min="0" step="0.001"
+                        value={(draft.ratios || {})[cid] ?? draft.ratio}
+                        onChange={(e) => patch({ ratios: { ...(draft.ratios || {}), [cid]: Math.max(0, Number(e.target.value)) } })} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <input className="inp" type="number" min="0" step="0.001" value={draft.ratio} onChange={(e) => patch({ ratio: Math.max(0, Number(e.target.value)) })} />
+              )}
+              {caps.length > 1 && <div className="hint">Each capture converts its own pixels before the terms are combined.</div>}
             </div>
           )}
         </>
       )}
+
       <div className="block-t" style={{ marginTop: 8 }}>Inference Line Colour{cfg.gt ? 's' : ''} <span className="ln" /></div>
       <div className="row2 field">
         <div><span className="tinylab">{cfg.gt ? 'OK colour' : 'Colour'}</span>
@@ -1978,17 +2181,11 @@ function DimensionForm({ draft, setDraft, shapes }) {
           {LABEL_SIZE_OPTS.map((o) => <option key={o.px} value={o.px}>{o.n}</option>)}
         </select>
       </div>
-      <div className="hint">{cfg.gt
-        ? `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.`
-        : `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the colour set above (${cfg.name} has no ground truth, so there is no OK/NG state).`}</div>
-      <div className="block-t" style={{ marginTop: 8 }}>Dimension Name <span className="ln" /></div>
-      <div className="field">
-        <span className="namewrap">
-          <span className="nameprefix">{cfg.name}_</span>
-          <input className="nameinput" type="text" value={nameSuffix} placeholder="1"
-            onChange={(e) => patch({ name: cfg.name + '_' + e.target.value.replace(/\s+/g, '') })} />
-        </span>
-      </div>
+      <div className="hint">{isCompound
+        ? `At inference every term is drawn, each marked with its operator, and the combined value is labelled “${draft.name}” once — in the OK colour when in-spec and the NG colour when out of tolerance.`
+        : cfg.gt
+          ? `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the OK colour when in-spec and the NG colour when out of tolerance.`
+          : `At inference, this dimension is drawn as a single line labelled “${draft.name}” (label text size set above), in the colour set above (${cfg.name} has no ground truth, so there is no OK/NG state).`}</div>
     </div>
   );
 }
@@ -2002,10 +2199,13 @@ function DimensionConfig({ dims, setDims, shapes }) {
   // A dimension errors when a shape it points at no longer exists — this blocks deployment
   // until the operator re-points it or deletes it.
   const dimError = (d) => {
-    const c = DIM_TYPE_CFG[d.type];
-    const two = c.linePick ? (d.angleMode || 'two features') === 'two features' : c.two;
-    if (!shapes.some((x) => x.id === d.shapeOneId)) return 'Feature A shape no longer exists';
-    if (two && !shapes.some((x) => x.id === d.shapeTwoId)) return 'Feature B shape no longer exists';
+    for (const [i, t] of allTerms(d).entries()) {
+      const c = DIM_TYPE_CFG[t.type];
+      const two = c.linePick ? (t.angleMode || 'two features') === 'two features' : c.two;
+      const where = i === 0 ? '' : ` (term ${i + 1})`;
+      if (!shapes.some((x) => x.id === t.shapeOneId)) return `Feature A shape no longer exists${where}`;
+      if (two && !shapes.some((x) => x.id === t.shapeTwoId)) return `Feature B shape no longer exists${where}`;
+    }
     return null;
   };
   const errored = dims.filter(dimError);
@@ -2055,23 +2255,33 @@ function DimensionConfig({ dims, setDims, shapes }) {
       </div>
       {dims.length > 0 && (
         <table className="dimtable">
-          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capture</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capture</th><th>Definition</th><th>Ground Truth</th><th></th></tr></thead>
           <tbody>
             {dims.map((d, i) => {
               const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
               const two = d.type === 1 ? (d.angleMode || 'two features') === 'two features' : cfg.two;
               const x = isCrossCapture(d), err = dimError(d);
+              const dTerms = allTerms(d), compound = dTerms.length > 1;
+              const dCaps = capturesUsed(d);
               return (
                 <tr key={d.id} style={err ? { background: '#fdf3f1' } : null}>
                   <td>{i + 1}</td>
                   <td><span className="dot" style={{ background: d.okColor }} />{d.name}
                     {err && <div style={{ color: 'var(--red)', fontSize: 10.5, fontWeight: 700, marginTop: 2 }}>⚠ {err}</div>}</td>
-                  <td>{cfg.name}</td>
+                  <td>{compound
+                    ? <span><span className="xcap sm">COMPOUND</span> <span style={{ marginLeft: 5 }}>{dTerms.map((t) => DIM_TYPE_CFG[t.type].name).join(' · ')}</span></span>
+                    : cfg.name}</td>
                   <td>{x
-                    ? <span className="xcap sm">{capLabel(d.captureOneId)} ⇄ {capLabel(d.captureTwoId)}</span>
+                    ? <span className="xcap sm">{dCaps.map(capLabel).join(' ⇄ ')}</span>
                     : capLabel(d.captureOneId)}</td>
-                  <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
-                  <td>{two ? `${shapeName(d.shapeTwoId)}${d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}` : '—'}</td>
+                  <td style={{ maxWidth: 320 }}>
+                    {dTerms.map((t, ti) => (
+                      <div key={t.id || 'base'} style={{ whiteSpace: 'nowrap' }}>
+                        {ti > 0 && <b style={{ color: 'var(--orange)', marginRight: 5 }}>{t.op}</b>}
+                        {termLabel(t, shapes)}
+                      </div>
+                    ))}
+                  </td>
                   <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
                   <td className="acts">
                     <span title="Edit" onClick={() => startEdit(d)}>✎</span>
