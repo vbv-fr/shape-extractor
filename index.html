@@ -1709,7 +1709,11 @@ function DimensionCanvas({ dim, shapes }) {
   const [curtain, setCurtain] = useState(250);
   const [blend, setBlend] = useState(0.55);
   const svgRef = useRef(null);
-  useEffect(() => { if (!caps.includes(baseId)) setBaseId(caps[0]); }, [caps.join('|')]);
+  const swapped = useRef(false);
+  // the base capture follows Feature A's capture until the operator swaps it by hand
+  useEffect(() => {
+    if (!caps.includes(baseId) || !swapped.current) setBaseId(caps[0]);
+  }, [caps.join('|')]);
 
   const baseCap = capById(caps.includes(baseId) ? baseId : caps[0]);
   const otherCaps = caps.filter((c) => c !== baseCap.id).map(capById);
@@ -1814,8 +1818,9 @@ function DimensionCanvas({ dim, shapes }) {
               {g.pA && g.pB && <line x1={g.pA[0]} y1={g.pA[1]} x2={g.pB[0]} y2={g.pB[1]} stroke={col} strokeWidth="2.4" />}
               {g.pA && <circle cx={g.pA[0]} cy={g.pA[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
               {g.pB && <circle cx={g.pB[0]} cy={g.pB[1]} r="4" fill={col} stroke="#fff" strokeWidth="1" />}
-              {g.op && g.pA && g.pB && (() => {
-                const mx = (g.pA[0] + g.pB[0]) / 2, my = (g.pA[1] + g.pB[1]) / 2;
+              {g.op && g.pA && (() => {
+                const mx = g.pB ? (g.pA[0] + g.pB[0]) / 2 : g.pA[0] + 15;
+                const my = g.pB ? (g.pA[1] + g.pB[1]) / 2 : g.pA[1] - 15;
                 return (
                   <g>
                     <circle cx={mx} cy={my} r="9" fill="#fff" stroke={col} strokeWidth="1.8" />
@@ -1854,7 +1859,7 @@ function DimensionCanvas({ dim, shapes }) {
                 {capById(cid).name}{baseCap.id === cid ? ' · base' : ''}
               </span>
             ))}
-            {otherCaps.length > 0 && <button className="swapbtn" onClick={() => setBaseId(otherCaps[0].id)}>⇄ Swap base</button>}
+            {otherCaps.length > 0 && <button className="swapbtn" onClick={() => { swapped.current = true; setBaseId(otherCaps[0].id); }}>⇄ Swap base</button>}
           </div>
         )}
         {cross && mode === 'blend' && (
