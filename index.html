@@ -1455,8 +1455,58 @@ function seedEdgeShapes() {
     mk('circle', 'Circle_3', 'cap4', { cx: 296, cy: 164, r: 66 }),
   ];
 }
-// No dimensions are inherited from Vision — the operator authors them here.
-function seedDims() { return []; }
+// Dimensions are authored here, not inherited from Vision. Seeded with a representative spread —
+// a plain single-capture one, the cross-capture driving case, a compound, and a no-ground-truth type.
+function seedDims(shapes) {
+  const id = (n) => (shapes.find((s) => s.name === n) || {}).id || '';
+  const cap = (n) => (shapes.find((s) => s.name === n) || {}).captureId || '';
+  const base = (type, name, over) => ({
+    id: 'dim_' + Math.floor(rnd() * 1e6), name, type,
+    distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14, terms: [],
+    operator: 1, targetValue: 0, tolerance: 0, ratio: 0.05, ratios: {},
+    okColor: '#56b733', ngColor: '#e0473a',
+    captureOneId: '', shapeOneId: '', shapeOneSelector: '',
+    captureTwoId: '', shapeTwoId: '', shapeTwoSelector: '', unit: 'mm',
+    ...over,
+  });
+  return [
+    // the driving case — edge resolved by Capture 1, cylinder face by Capture 2
+    base(2, 'Distance_1', {
+      distanceAxis: 'x',
+      captureOneId: cap('EdgeSearch_1'), shapeOneId: id('EdgeSearch_1'), shapeOneSelector: 'Line 1 · Middle',
+      captureTwoId: cap('Circle_1'), shapeTwoId: id('Circle_1'), shapeTwoSelector: 'Centre',
+      operator: 1, targetValue: 128, tolerance: 1.5, unit: 'mm',
+      ratios: { [cap('EdgeSearch_1')]: 0.05, [cap('Circle_1')]: 0.05 },
+    }),
+    // plain, wholly inside one capture
+    base(1, 'Angle_1', {
+      captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Whole line',
+      captureTwoId: cap('Quadrilateral_1'), shapeTwoId: id('Quadrilateral_1'), shapeTwoSelector: 'Edge 1',
+      operator: 1, targetValue: 90, tolerance: 0.5, unit: '°',
+    }),
+    // compound — one ground truth over two measurements, taken on different captures
+    base(4, 'Length_1', {
+      captureOneId: cap('Circle_1'), shapeOneId: id('Circle_1'), shapeOneSelector: 'Radius',
+      operator: 3, targetValue: 62, tolerance: 1, unit: 'mm',
+      ratios: { [cap('Circle_1')]: 0.05, [cap('Line_1')]: 0.05 },
+      terms: [{
+        id: 'trm_' + Math.floor(rnd() * 1e6), op: '+', type: 4,
+        distanceAxis: 'euclidean', angleMode: 'two features',
+        captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Length',
+        captureTwoId: '', shapeTwoId: '', shapeTwoSelector: '', unit: 'mm',
+      }],
+    }),
+    // single closed shape, no second feature
+    base(3, 'Area_1', {
+      captureOneId: cap('Ellipse_1'), shapeOneId: id('Ellipse_1'), shapeOneSelector: '',
+      operator: 2, targetValue: 2400, tolerance: 30, unit: 'mm²',
+    }),
+    // a type that carries no ground truth at all
+    base(5, 'Convexity_1', {
+      captureOneId: cap('Circle_1'), shapeOneId: id('Circle_1'), shapeOneSelector: '', unit: '',
+    }),
+  ];
+}
 
 // One read-only-identity, editable-params shape card (Edge side)
 function EdgeShapeCard({ shape, idx, selected, onSelect, onChange }) {
@@ -2263,7 +2313,7 @@ function DimensionConfig({ dims, setDims, shapes }) {
 function EdgeShell({ toast }) {
   const [tab, setTab] = useState('emc');           // 'emc' | 'dim'
   const [shapes, setShapes] = useState(seedEdgeShapes);
-  const [dims, setDims] = useState(seedDims);
+  const [dims, setDims] = useState(() => seedDims(shapes));
   const [emcCap, setEmcCap] = useState(CAPTURES[0].id);   // Edit Module Configurations is per capture
   const [sel, setSel] = useState(() => shapes.find((s) => s.captureId === CAPTURES[0].id).id);
   const [dirty, setDirty] = useState(false);
