@@ -1383,7 +1383,7 @@ const SHAPE_DIMS = {
 // Angle → two 1d, Distance → two 0d, Area → one 2d, Length → one 1d, Convexity / ContourContinuity → closed shapes only.
 const DIM_TYPE_CFG = {
   1: { name: 'Angle', param: '1d', two: true, gt: true, unit: '°', linePick: true },
-  2: { name: 'Distance', param: '0d', two: true, gt: true, unit: 'mm', axis: true },
+  2: { name: 'Distance', param: '0d', two: true, gt: true, unit: 'mm', axis: true, cross: true },
   3: { name: 'Area', param: '2d', two: false, gt: true, unit: 'mm²' },
   4: { name: 'Length', param: '1d', two: false, gt: true, unit: 'mm', keyPick: true },
   5: { name: 'Convexity', param: 'closed', two: false, gt: false, unit: '' },
@@ -1421,15 +1421,16 @@ function typeDefaults(type, shapes, prefCapture) {
   const s0 = inA[0];
   let capB = capA;
   let poolB = inA.filter((s) => !s0 || s.id !== s0.id);
-  if (cfg.two && poolB.length === 0) {
-    // only one qualifying shape in this capture → fall back to any other capture that has one
+  // Only Distance may take its two features from different captures. Every other type is confined
+  // to one capture, so Feature B never leaves Feature A's capture.
+  if (cfg.two && cfg.cross && poolB.length === 0) {
     const alt = CAPTURES.find((c) => c.id !== capA && valid.some((s) => s.captureId === c.id));
     if (alt) { capB = alt.id; poolB = valid.filter((s) => s.captureId === capB); }
   }
   const s1 = poolB[0] || s0;
   return {
     captureOneId: capA, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, type),
-    captureTwoId: cfg.two ? capB : '', shapeTwoId: cfg.two && s1 ? s1.id : '',
+    captureTwoId: cfg.two ? (cfg.cross ? capB : capA) : '', shapeTwoId: cfg.two && s1 ? s1.id : '',
     shapeTwoSelector: cfg.two ? defaultSelector(s1, type) : '',
     unit: cfg.unit,
   };
@@ -1934,7 +1935,8 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
   const defSel = (id) => subOptsFor(id)[0] || '';
 
   const capA = node.captureOneId || (CAPTURES[0] || {}).id;
-  const capB = node.captureTwoId || capA;
+  // a type that cannot span captures pins Feature B to Feature A's capture
+  const capB = cfg.cross ? (node.captureTwoId || capA) : capA;
   const shapesIn = (capId) => shapes.filter((s) => s.captureId === capId && shapeQualifies(s, node.type));
   // any capture of the variant may pair with any other — they are related through the capture layout,
   // not through matching resolution
@@ -1983,7 +1985,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       </div>
       <div className="field">
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
-        {captureSelect(capA, capOptsA, changeCaptureA)}
+        {cfg.cross && captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
           {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
@@ -1992,7 +1994,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       {twoFeatures && (
         <div className="field">
           <span className="tinylab">Feature B {crossCapture && <span className="xcap sm">⇄ CROSS-CAPTURE</span>}</span>
-          {captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
+          {cfg.cross && captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
           <div className="feat">
             {shapeSelect(node.shapeTwoId, capB, (e) => changeShape('two', e.target.value))}
             {showSubB && <select className="sel" value={node.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{optsB.map((f) => <option key={f}>{f}</option>)}</select>}
@@ -2013,6 +2015,19 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
   const changeType = (type) => patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix,
     ...typeDefaults(type, shapes, draft.captureOneId) });
 
+  // Types other than Distance live in a single capture, so the capture is picked here rather than
+  // being repeated in Feature A and Feature B.
+  const shapesInCap = (capId) => shapes.filter((x) => x.captureId === capId && shapeQualifies(x, draft.type));
+  const soleCapOpts = CAPTURES.filter((c) => shapesInCap(c.id).length > 0);
+  const changeSoleCapture = (capId) => {
+    const list = shapesInCap(capId);
+    const s0 = list[0], s1 = list[1] || list[0];
+    patch({
+      captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, draft.type),
+      captureTwoId: capId, shapeTwoId: s1 ? s1.id : '', shapeTwoSelector: defaultSelector(s1, draft.type),
+    });
+  };
+
   const caps = capturesUsed(draft);
   const ref = layout.referenceId;
   const setRatio = (id, v) => setLayout({ ...layout, ratio: { ...layout.ratio, [id]: v } });
@@ -2031,7 +2046,11 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
         <div className="cth"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span></div>
         {caps.map((cid) => (
           <div className="ctr" key={cid}>
-            <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
+            {cfg.cross
+              ? <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
+              : <select className="sel" value={cid} onChange={(e) => changeSoleCapture(e.target.value)}>
+                  {soleCapOpts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>}
             <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2}
               onChange={(e) => setRatio(cid, Math.max(0, Number(e.target.value)))} />
             <input className="inp" type="number" step="0.5" value={layout.angle[cid] ?? 0}
@@ -2041,7 +2060,7 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
       </div>
 
       {/* ---- where the capture centres sit relative to one another ---- */}
-      {caps.length > 1 && (
+      {cfg.cross && caps.length > 1 && (
         <Fragment>
           <div className="block-t" style={{ marginTop: 12 }}>Capture Separation <span className="ln" /></div>
           <div className="field">
