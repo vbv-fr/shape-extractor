@@ -2005,9 +2005,18 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
         {cfg.linePick && <div><span className="tinylab">Angle from</span>
           <select className="sel" value={angleMode} onChange={(e) => patch({ angleMode: e.target.value })}>{ANGLE_MODE_OPTS.map((o) => <option key={o}>{o}</option>)}</select></div>}
       </div>
+      {/* A dimension confined to one capture picks it ONCE, for the whole dimension — it belongs to
+          neither feature. Distance is the exception: each feature names its own, which is what lets
+          the two differ. Either way the flow reads capture → shape → point. */}
+      {!cfg.cross && (
+        <div className="field">
+          <span className="tinylab">Capture</span>
+          {captureSelect(capA, capOptsA, changeCaptureA)}
+        </div>
+      )}
       <div className="field">
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
-        {captureSelect(capA, capOptsA, changeCaptureA)}
+        {cfg.cross && captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
           {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
