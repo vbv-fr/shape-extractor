@@ -406,10 +406,15 @@ const DEFAULT_LAYOUT = {
 // image footprint in mm = declared pixel size x the capture's ratio
 const capMM = (layout, id) => { const c = capById(id), r = layout.ratio[id] || 0.2; return { w: c.w * r, h: c.h * r }; };
 // a point in a capture's pixel space -> the variant's shared mm world
+// Separation is entered the way a person reads a layout drawing: X left to right, Y BOTTOM TO TOP.
+// The canvas draws with Y increasing downward, so the operator's Y is negated here, at the one
+// boundary where it enters the model. Everything downstream stays in drawing coordinates.
+const offInternal = (layout, id) => { const o = layout.offset[id] || { x: 0, y: 0 }; return { x: o.x, y: -o.y }; };
+
 function toWorld(layout, capId, px, py, imgW, imgH) {
   const r = layout.ratio[capId] || 0.2;
   const a = ((layout.angle[capId] || 0) * Math.PI) / 180;
-  const off = layout.offset[capId] || { x: 0, y: 0 };
+  const off = offInternal(layout, capId);
   const lx = (px - imgW / 2) * r, ly = (py - imgH / 2) * r;      // mm from this image's centre
   return [off.x + lx * Math.cos(a) - ly * Math.sin(a),
           off.y + lx * Math.sin(a) + ly * Math.cos(a)];
@@ -917,6 +922,14 @@ function ConfirmModal({ open, onKeep, onDiscard }) {
 }
 function TrashIcon() {
   return (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /></svg>);
+}
+function InfoIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <circle cx="12" cy="12" r="9" /><line x1="12" y1="11.5" x2="12" y2="16.5" strokeLinecap="round" />
+      <circle cx="12" cy="7.6" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
 }
 function PencilIcon() {
   return (<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>);
@@ -1496,7 +1509,7 @@ function seedDims(shapes) {
       distanceAxis: 'euclidean',
       captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Start',
       captureTwoId: cap('Circle_2'), shapeTwoId: id('Circle_2'), shapeTwoSelector: 'Centre',
-      operator: 1, targetValue: 325, tolerance: 2, unit: 'mm',
+      operator: 1, targetValue: 320.7, tolerance: 2, unit: 'mm',
     }),
     base(1, 'Angle_1', {
       captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Whole line',
@@ -1773,7 +1786,7 @@ function DimensionCanvas({ dim, shapes, layout }) {
   // ---- place every capture's footprint in the mm world, then fit the lot to the viewport ----
   const placed = caps.map((cid) => {
     const mm = capMM(layout, cid);
-    const off = layout.offset[cid] || { x: 0, y: 0 };
+    const off = offInternal(layout, cid);
     const ang = layout.angle[cid] || 0;
     const a = (ang * Math.PI) / 180, cs = Math.cos(a), sn = Math.sin(a);
     const corners = [[-mm.w / 2, -mm.h / 2], [mm.w / 2, -mm.h / 2], [mm.w / 2, mm.h / 2], [-mm.w / 2, mm.h / 2]]
@@ -1952,7 +1965,16 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       ? { captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, node.type) }
       : { captureTwoId: capId, shapeTwoId: s0 ? s0.id : '', shapeTwoSelector: defaultSelector(s0, node.type) };
   };
-  const changeCaptureA = (capId) => patch(seedFeature('one', capId));
+  const changeCaptureA = (capId) => {
+    if (cfg.cross) return patch(seedFeature('one', capId));
+    // a type confined to one capture drags Feature B along with Feature A
+    const list = shapesIn(capId);
+    const s0 = list[0], s1 = list[1] || list[0];
+    patch({
+      captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, node.type),
+      captureTwoId: capId, shapeTwoId: s1 ? s1.id : '', shapeTwoSelector: defaultSelector(s1, node.type),
+    });
+  };
   const changeShape = (which, id) => {
     const sel = defSel(id);
     patch(which === 'one' ? { shapeOneId: id, shapeOneSelector: sel } : { shapeTwoId: id, shapeTwoSelector: sel });
@@ -1985,7 +2007,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       </div>
       <div className="field">
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
-        {cfg.cross && captureSelect(capA, capOptsA, changeCaptureA)}
+        {captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
           {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
@@ -2015,62 +2037,59 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
   const changeType = (type) => patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix,
     ...typeDefaults(type, shapes, draft.captureOneId) });
 
-  // Types other than Distance live in a single capture, so the capture is picked here rather than
-  // being repeated in Feature A and Feature B.
-  const shapesInCap = (capId) => shapes.filter((x) => x.captureId === capId && shapeQualifies(x, draft.type));
-  const soleCapOpts = CAPTURES.filter((c) => shapesInCap(c.id).length > 0);
-  const changeSoleCapture = (capId) => {
-    const list = shapesInCap(capId);
-    const s0 = list[0], s1 = list[1] || list[0];
-    patch({
-      captureOneId: capId, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, draft.type),
-      captureTwoId: capId, shapeTwoId: s1 ? s1.id : '', shapeTwoSelector: defaultSelector(s1, draft.type),
-    });
-  };
-
   const caps = capturesUsed(draft);
   const ref = layout.referenceId;
   const setRatio = (id, v) => setLayout({ ...layout, ratio: { ...layout.ratio, [id]: v } });
   const setAngle = (id, v) => setLayout({ ...layout, angle: { ...layout.angle, [id]: v } });
   const setOffset = (id, k, v) => setLayout({ ...layout,
     offset: { ...layout.offset, [id]: { ...(layout.offset[id] || { x: 0, y: 0 }), [k]: v } } });
+  // Changing the reference re-expresses every separation against the new origin, overriding what was
+  // entered before: the new reference becomes (0, 0) and the old one picks up the inverse.
+  const changeReference = (newRef) => {
+    const base = layout.offset[newRef] || { x: 0, y: 0 };
+    const next = {};
+    CAPTURES.forEach((c) => {
+      const o = layout.offset[c.id] || { x: 0, y: 0 };
+      next[c.id] = { x: o.x - base.x, y: o.y - base.y };
+    });
+    setLayout({ ...layout, referenceId: newRef, offset: next });
+  };
   const others = caps.filter((c) => c !== ref);
 
   return (
     <div style={{ padding: '4px 2px' }}>
       <FeatureCascade node={draft} patch={patch} shapes={shapes} typeOpts={DIM_TYPE_OPTS} onType={changeType} />
 
-      {/* ---- how each capture maps into the variant's millimetre world ---- */}
-      <div className="block-t" style={{ marginTop: 12 }}>Capture Setup <span className="ln" /></div>
-      <div className="captbl">
-        <div className="cth"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span></div>
-        {caps.map((cid) => (
-          <div className="ctr" key={cid}>
-            {cfg.cross
-              ? <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
-              : <select className="sel" value={cid} onChange={(e) => changeSoleCapture(e.target.value)}>
-                  {soleCapOpts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>}
-            <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2}
-              onChange={(e) => setRatio(cid, Math.max(0, Number(e.target.value)))} />
-            <input className="inp" type="number" step="0.5" value={layout.angle[cid] ?? 0}
-              onChange={(e) => setAngle(cid, Number(e.target.value))} />
-          </div>
-        ))}
-      </div>
-
-      {/* ---- where the capture centres sit relative to one another ---- */}
-      {cfg.cross && caps.length > 1 && (
+      {/* ---- the capture layout only exists to relate TWO captures; a single-capture dimension
+              needs nothing but its scale, which is asked for with the ground truth below ---- */}
+      {caps.length > 1 && (
         <Fragment>
+          <div className="block-t" style={{ marginTop: 12 }}>Capture Setup <span className="ln" /></div>
+          <div className="captbl">
+            <div className="cth"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span></div>
+            {caps.map((cid) => (
+              <div className="ctr" key={cid}>
+                <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
+                <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2}
+                  onChange={(e) => setRatio(cid, Math.max(0, Number(e.target.value)))} />
+                <input className="inp" type="number" step="0.5" value={layout.angle[cid] ?? 0}
+                  onChange={(e) => setAngle(cid, Number(e.target.value))} />
+              </div>
+            ))}
+          </div>
+
           <div className="block-t" style={{ marginTop: 12 }}>Capture Separation <span className="ln" /></div>
           <div className="field">
             <span className="tinylab">Reference capture</span>
-            <select className="sel" value={ref} onChange={(e) => setLayout({ ...layout, referenceId: e.target.value })}>
+            <select className="sel" value={ref} onChange={(e) => changeReference(e.target.value)}>
               {CAPTURES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div className="captbl">
-            <div className="cth"><span>From {capLabel(ref)}</span><span>X (mm)</span><span>Y (mm)</span></div>
+            <div className="cth"><span>From {capLabel(ref)}</span>
+              <span>X (mm)<span className="eyehint" title="Measured left to right. A positive X places this capture to the right of the reference capture."><InfoIcon /></span></span>
+              <span>Y (mm)<span className="eyehint" title="Measured bottom to top. A positive Y places this capture above the reference capture."><InfoIcon /></span></span>
+            </div>
             {others.map((cid) => (
               <div className="ctr" key={cid}>
                 <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
@@ -2080,7 +2099,6 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
                   onChange={(e) => setOffset(cid, 'y', Number(e.target.value))} />
               </div>
             ))}
-            {others.length === 0 && <div className="ctr one"><span className="cname">Both features are on {capLabel(ref)}</span></div>}
           </div>
         </Fragment>
       )}
@@ -2104,6 +2122,13 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
             <div><span className="tinylab">Tolerance</span><input className="inp" type="number" min="0" value={draft.tolerance} onChange={(e) => patch({ tolerance: Math.max(0, Number(e.target.value)) })} /></div>
             <div><span className="tinylab">Unit</span><select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select></div>
           </div>
+          {caps.length === 1 && draft.type !== 1 && (
+            <div className="field" style={{ marginTop: 10 }}>
+              <span className="tinylab">Ratio (pixel to mm)</span>
+              <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[caps[0]] ?? 0.2}
+                onChange={(e) => setRatio(caps[0], Math.max(0, Number(e.target.value)))} />
+            </div>
+          )}
         </>
       )}
 
