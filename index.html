@@ -1516,8 +1516,8 @@ function makeDim(shapes, n) {
   };
 }
 // A cross-capture dimension: same shape as a normal dimension, but Feature B defaults to a different
-// capture. Only the two-feature types (Angle, Distance) can span captures.
-const CROSS_TYPE_OPTS = DIM_TYPE_OPTS.filter((o) => o.v === 1 || o.v === 2);
+// capture. Only Distance is allowed across captures (the Type dropdown is greyed out to convey this).
+const CROSS_TYPE_OPTS = DIM_TYPE_OPTS.filter((o) => o.v === 2);
 function makeCrossDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Distance_' + n,
@@ -2067,7 +2067,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType, allowCross = fa
     <div>
       <div className="row3 field">
         {typeOpts && <div><span className="tinylab">Type</span>
-          <select className="sel" value={node.type} onChange={(e) => onType(Number(e.target.value))}>
+          <select className="sel" value={node.type} disabled={typeOpts.length <= 1} title={typeOpts.length <= 1 ? 'Only Distance can be measured across captures' : undefined} onChange={(e) => onType(Number(e.target.value))}>
             {typeOpts.map((o) => <option key={o.v} value={o.v}>{o.n}</option>)}
           </select>
         </div>}
@@ -2213,6 +2213,9 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
   };
   const removeCap = (id) => { if (id !== ref) setActiveCaps((p) => p.filter((x) => x !== id)); };
 
+  // Adding a capture drops a draft ROW into the table whose Capture cell is a picker; choosing a
+  // capture there establishes it. No nested dropdown-in-a-dropdown.
+  const [pendingRow, setPendingRow] = useState(false);
   // Save / Reset the capture layout — the bar appears once the setup is changed (e.g. a capture added).
   const [committed, setCommitted] = useState(() => ({ activeCaps: [...activeCaps], layout: clone(layout) }));
   const snapOf = (a, L) => JSON.stringify([a, L.ratio, L.angle, L.offset, L.referenceId]);
@@ -2285,14 +2288,25 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
             </div>
           );
         })}
+        {pendingRow && (
+          <div className="xr">
+            <select className="sel" style={{ width: '100%' }} value="" onChange={(e) => { if (e.target.value) { establish(e.target.value); setPendingRow(false); } }}>
+              <option value="">Select capture…</option>
+              {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input className="inp" disabled value="0.2" readOnly />
+            <input className="inp" disabled value="0" readOnly />
+            <input className="inp" disabled value="0" readOnly />
+            <input className="inp" disabled value="0" readOnly />
+            <span className="refbtn" style={{ opacity: 0.35 }}>—</span>
+            <span className="rm" title="Cancel" onClick={() => setPendingRow(false)}>✕</span>
+          </div>
+        )}
       </div>
       <div className="xcap-tablefoot">
         <div>
-          {remaining.length > 0 && (
-            <select className="sel" style={{ maxWidth: 220 }} value="" onChange={(e) => establish(e.target.value)}>
-              <option value="">＋ Add Capture</option>
-              {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+          {remaining.length > 0 && !pendingRow && (
+            <button className="btn btn-ghost sm" onClick={() => setPendingRow(true)}>＋ Add Capture</button>
           )}
         </div>
         {dirty && (
@@ -2344,10 +2358,22 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
 }
 
 // Dimension Configuration: table list ↔ add/edit sub-page
-function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps, setActiveCaps }) {
+function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps, setActiveCaps, setDimHeader }) {
   const [view, setView] = useState('list');
   const [draft, setDraft] = useState(null);
   const [editId, setEditId] = useState(null);
+  // The sub-page header (back arrow + title) is lifted into the Edge chrome, so it sits ABOVE the
+  // Instance / Variant selectors rather than inside the page body.
+  useEffect(() => {
+    if (!setDimHeader) return;
+    const H = {
+      edit:  { title: (editId ? 'Edit' : 'Add') + ' Dimension', backLabel: 'Dimension Configuration', back: () => setView('list') },
+      xedit: { title: (editId ? 'Edit' : 'Add') + ' Cross Capture Dimension', backLabel: 'Cross Capture Dimensioning', back: () => setView('xcap') },
+      xcap:  { title: 'Cross Capture Dimensioning', backLabel: 'Dimension Configuration', back: () => setView('list') },
+    };
+    setDimHeader(H[view] || null);
+  }, [view, editId]);
+  useEffect(() => () => setDimHeader && setDimHeader(null), []);
   const shapeName = (id) => (shapes.find((s) => s.id === id) || {}).name || '';
   // A dimension errors when a shape it points at no longer exists — this blocks deployment
   // until the operator re-points it or deletes it.
@@ -2374,10 +2400,6 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
   if (view === 'edit' && draft) {
     return (
       <div className="dimedit">
-        <div className="dimedit-hd">
-          <button className="linkback" onClick={() => setView('list')}>← Dimension Configuration</button>
-          <span>{editId ? 'Edit' : 'Add'} Dimension</span>
-        </div>
         <div className="dimedit-split">
           <div className="dimedit-form"><DimensionForm draft={draft} setDraft={setDraft} shapes={shapes} layout={layout} setLayout={setLayout} /></div>
           <div className="emc-canvas">
@@ -2397,10 +2419,6 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
   if (view === 'xedit' && draft) {
     return (
       <div className="dimedit">
-        <div className="dimedit-hd">
-          <button className="linkback" onClick={() => setView('xcap')}>← Cross Capture Dimensioning</button>
-          <span>{editId ? 'Edit' : 'Add'} Cross Capture Dimension</span>
-        </div>
         <div className="dimedit-split">
           <div className="dimedit-form"><DimensionForm draft={draft} setDraft={setDraft} shapes={shapes} layout={layout} setLayout={setLayout} allowCross={true} typeOpts={CROSS_TYPE_OPTS} /></div>
           <div className="emc-canvas">
@@ -2418,10 +2436,6 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
   if (view === 'xcap') {
     return (
       <div className="dimedit">
-        <div className="dimedit-hd">
-          <button className="linkback" onClick={() => setView('list')}>← Dimension Configuration</button>
-          <span>Cross Capture Dimensioning</span>
-        </div>
         <div className="dimlist">
           <div className="block-t">Capture Layout Setup <span className="ln" /></div>
           <CaptureLayoutSetup layout={layout} setLayout={setLayout} activeCaps={activeCaps} setActiveCaps={setActiveCaps} />
@@ -2522,6 +2536,7 @@ function EdgeShell({ toast }) {
   const [emcCap, setEmcCap] = useState(CAPTURES[0].id);   // Edit Module Configurations is per capture
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);   // capture layout — variant scope, shared by every dimension
   const [activeCaps, setActiveCaps] = useState(['cap1', 'cap2', 'cap3']);   // captures established in the cross-capture layout
+  const [dimHeader, setDimHeader] = useState(null);   // sub-page header (back + title) lifted above the selectors
   const [sel, setSel] = useState(() => shapes.find((s) => s.captureId === CAPTURES[0].id).id);
   const [dirty, setDirty] = useState(false);
   const [reviewModal, setReviewModal] = useState(false);
@@ -2553,6 +2568,12 @@ function EdgeShell({ toast }) {
       </div>
       <div className="emc-main">
       <div className="emc-crumbs">Instances <span>›</span> Inferencing Customization <span>›</span> <b>{tab === 'emc' ? 'Edit Module Configurations' : 'Dimension Configuration'}</b></div>
+      {tab === 'dim' && dimHeader && (
+        <div className="dimedit-hd">
+          <button className="linkback" onClick={dimHeader.back}>← {dimHeader.backLabel}</button>
+          <span>{dimHeader.title}</span>
+        </div>
+      )}
       <div className="emc-selectors">
         <div className="fld grow">
           <label>Instance <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(Instance · Project · Plant)</span></label>
@@ -2575,7 +2596,7 @@ function EdgeShell({ toast }) {
       <div className="emc-body">
         {tab === 'emc'
           ? <EdgeShapeEditor shapes={capShapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={() => setDirty(true)} />
-          : <DimensionConfig dims={dims} setDims={setDims} shapes={shapes} layout={layout} setLayout={setLayout} activeCaps={activeCaps} setActiveCaps={setActiveCaps} />}
+          : <DimensionConfig dims={dims} setDims={setDims} shapes={shapes} layout={layout} setLayout={setLayout} activeCaps={activeCaps} setActiveCaps={setActiveCaps} setDimHeader={setDimHeader} />}
       </div>
 
       {tab === 'emc' && (
