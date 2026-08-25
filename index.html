@@ -174,7 +174,18 @@
   .modal .mf{display:flex;justify-content:flex-end;gap:9px;padding:12px 16px;border-top:1px solid #eef0f1;}
 
   /* ===== Edge · Edit Module Configurations ===== */
-  .emc{flex:1;display:flex;flex-direction:column;min-height:0;}
+  .emc{flex:1;display:flex;flex-direction:row;min-height:0;}
+  /* Left-hand navigation pane — mirrors the real Edge UI, where the Inferencing Customizations
+     section holds its actions (Edit Module Configurations, Dimension Configuration). */
+  .emc-nav{width:238px;flex-shrink:0;background:#fafbfc;border-right:1px solid var(--line);padding:12px 0;overflow-y:auto;}
+  .emc-nav .navroot{display:flex;align-items:center;gap:8px;padding:6px 16px 10px;font-size:12px;font-weight:600;color:var(--muted);}
+  .emc-nav .navsec{font-size:10.5px;font-weight:800;letter-spacing:.055em;text-transform:uppercase;color:#9aa1a8;padding:8px 16px 5px;}
+  .emc-nav .navitem{display:flex;align-items:center;gap:9px;padding:9px 16px 9px 24px;font-size:13px;font-weight:600;color:#3d4247;cursor:pointer;border-left:3px solid transparent;}
+  .emc-nav .navitem:hover{background:#f0f2f4;}
+  .emc-nav .navitem.on{color:var(--orange);border-left-color:var(--orange);background:#fff5f1;}
+  .emc-nav svg{width:15px;height:15px;flex-shrink:0;}
+  .emc-nav .navroot svg{opacity:.7;}
+  .emc-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;}
   .emc-crumbs{display:flex;align-items:center;gap:7px;padding:8px 16px;font-size:12px;color:var(--muted);background:#fafbfc;border-bottom:1px solid var(--line);}
   .emc-crumbs b{color:var(--ink);font-weight:600;}
   .emc-selectors{display:flex;gap:14px;padding:12px 16px;background:#fff;border-bottom:1px solid var(--line);flex-wrap:wrap;}
@@ -2306,6 +2317,22 @@ function EdgeShell({ toast }) {
 
   return (
     <div className="emc">
+      <div className="emc-nav">
+        <div className="navroot">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2" y="2" width="12" height="4" rx="1"/><rect x="2" y="9" width="12" height="4" rx="1"/></svg>
+          Instances
+        </div>
+        <div className="navsec">Inferencing Customizations</div>
+        <div className={'navitem' + (tab === 'emc' ? ' on' : '')} onClick={() => setTab('emc')}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+          Edit Module Configurations
+        </div>
+        <div className={'navitem' + (tab === 'dim' ? ' on' : '')} onClick={() => setTab('dim')}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"><rect x="1.5" y="4.5" width="13" height="7" rx="1"/><path d="M4.5 4.5v2M7 4.5v3M9.5 4.5v2M12 4.5v3" strokeLinecap="round"/></svg>
+          Dimension Configuration
+        </div>
+      </div>
+      <div className="emc-main">
       <div className="emc-crumbs">Instances <span>›</span> Inferencing Customization <span>›</span> <b>{tab === 'emc' ? 'Edit Module Configurations' : 'Dimension Configuration'}</b></div>
       <div className="emc-selectors">
         <div className="fld grow">
@@ -2326,11 +2353,6 @@ function EdgeShell({ toast }) {
           <div className="fld"><label>Variant</label><select className="sel"><option>Variant A</option></select></div>
         )}
       </div>
-      <div className="emc-tabs">
-        <button className={tab === 'emc' ? 'on' : ''} onClick={() => setTab('emc')}>Edit Module Configurations</button>
-        <button className={tab === 'dim' ? 'on' : ''} onClick={() => setTab('dim')}>Dimension Configuration</button>
-      </div>
-
       <div className="emc-body">
         {tab === 'emc'
           ? <EdgeShapeEditor shapes={capShapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={() => setDirty(true)} />
@@ -2343,6 +2365,7 @@ function EdgeShell({ toast }) {
           <button className="btn btn-primary sm" disabled={!dirty} onClick={onSave}>Save</button>
         </div>
       )}
+      </div>
 
       {reviewModal && (
         <div className="overlay" onClick={() => setReviewModal(false)}>
