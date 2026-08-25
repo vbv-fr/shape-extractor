@@ -243,8 +243,7 @@
   .captbl .cname .cd{width:9px;height:9px;border-radius:50%;flex:none;}
   .captbl .inp{width:100%;}
   /* Cross Capture Dimensioning — one-time capture layout setup */
-  .xcap-note{font-size:12px;color:var(--muted);line-height:1.55;margin:0 0 12px;}
-  .xcap-canvaswrap{background:#eceef0;border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;justify-content:center;}
+  .xcap-canvaswrap{background:#eceef0;border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;justify-content:center;margin-top:12px;}
   .xcaptbl{border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:12px;}
   .xcaptbl .xh,.xcaptbl .xr{display:grid;grid-template-columns:1.5fr .95fr .95fr .8fr .8fr .55fr .4fr;gap:8px;align-items:center;padding:7px 10px;}
   .xcaptbl .xh{background:var(--hdr);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
@@ -256,7 +255,8 @@
   .xcaptbl .refbtn.on{color:#fff;background:var(--orange);border-color:var(--orange);cursor:default;}
   .xcaptbl .rm{cursor:pointer;color:var(--muted);text-align:center;font-size:13px;}
   .xcaptbl .rm:hover{color:var(--red);}
-  .xcap-establish{display:flex;align-items:center;gap:8px;margin-top:10px;}
+  .xcap-tablefoot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;min-height:30px;}
+  .xcap-saverow{display:flex;align-items:center;gap:8px;}
   .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:16px;line-height:1.45;}
   .banner.warn{background:#fdECe8;color:#b8341f;border:1px solid #f3c4b8;}
   .banner.ok{background:#eef7ea;color:var(--green-d);border:1px solid #cdeabf;}
@@ -2213,6 +2213,13 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
   };
   const removeCap = (id) => { if (id !== ref) setActiveCaps((p) => p.filter((x) => x !== id)); };
 
+  // Save / Reset the capture layout — the bar appears once the setup is changed (e.g. a capture added).
+  const [committed, setCommitted] = useState(() => ({ activeCaps: [...activeCaps], layout: clone(layout) }));
+  const snapOf = (a, L) => JSON.stringify([a, L.ratio, L.angle, L.offset, L.referenceId]);
+  const dirty = snapOf(activeCaps, layout) !== snapOf(committed.activeCaps, committed.layout);
+  const saveLayout = () => setCommitted({ activeCaps: [...activeCaps], layout: clone(layout) });
+  const resetLayout = () => { setActiveCaps([...committed.activeCaps]); setLayout(clone(committed.layout)); };
+
   // ---- place every established capture's footprint in the mm world, then fit the lot to the viewport ----
   const placed = activeCaps.map((cid) => {
     const mm = capMM(layout, cid);
@@ -2262,12 +2269,40 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
 
   return (
     <div>
-      <div className="xcap-note">
-        There is usually a fixed rig of several cameras. Establish each capture <b>once</b> — its pixel-to-mm ratio,
-        orientation, and where its <b>centre</b> sits relative to the reference capture — then every cross-capture
-        dimension reuses this layout. Separation is entered as the reference capture's origin: <b>X</b> left-to-right,
-        <b> Y</b> bottom-to-top (in mm). <b>Drag</b> a capture on the canvas to place it, or type X / Y below.
+      <div className="xcaptbl">
+        <div className="xh"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span><span>X (mm)</span><span>Y (mm)</span><span>Reference</span><span></span></div>
+        {activeCaps.map((cid) => {
+          const isRef = cid === ref;
+          return (
+            <div className="xr" key={cid}>
+              <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
+              <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2} onChange={(e) => setRatio(cid, Number(e.target.value))} />
+              <SignedNumber value={layout.angle[cid] ?? 0} onChange={(v) => setAngle(cid, v)} />
+              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).x ?? 0} onChange={(v) => !isRef && setOff(cid, 'x', v)} />
+              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).y ?? 0} onChange={(v) => !isRef && setOff(cid, 'y', v)} />
+              <span className={'refbtn' + (isRef ? ' on' : '')} onClick={() => !isRef && changeReference(cid)}>{isRef ? 'Reference' : 'Set ref'}</span>
+              <span className="rm" title={isRef ? 'The reference capture cannot be removed' : 'Remove capture'} style={isRef ? { opacity: 0.25, cursor: 'not-allowed' } : null} onClick={() => removeCap(cid)}><TrashIcon /></span>
+            </div>
+          );
+        })}
       </div>
+      <div className="xcap-tablefoot">
+        <div>
+          {remaining.length > 0 && (
+            <select className="sel" style={{ maxWidth: 220 }} value="" onChange={(e) => establish(e.target.value)}>
+              <option value="">＋ Add Capture</option>
+              {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+        </div>
+        {dirty && (
+          <div className="xcap-saverow">
+            <button className="btn btn-ghost sm" onClick={resetLayout}>Reset</button>
+            <button className="btn btn-primary sm" onClick={saveLayout}>Save</button>
+          </div>
+        )}
+      </div>
+
       <div className="xcap-canvaswrap">
         <div className="frame">
           <span className="flabel">PLANT LAYOUT · mm</span>
@@ -2304,32 +2339,6 @@ function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
           </svg>
         </div>
       </div>
-
-      <div className="xcaptbl">
-        <div className="xh"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span><span>X (mm)</span><span>Y (mm)</span><span>Reference</span><span></span></div>
-        {activeCaps.map((cid) => {
-          const isRef = cid === ref;
-          return (
-            <div className="xr" key={cid}>
-              <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
-              <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2} onChange={(e) => setRatio(cid, Number(e.target.value))} />
-              <SignedNumber value={layout.angle[cid] ?? 0} onChange={(v) => setAngle(cid, v)} />
-              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).x ?? 0} onChange={(v) => !isRef && setOff(cid, 'x', v)} />
-              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).y ?? 0} onChange={(v) => !isRef && setOff(cid, 'y', v)} />
-              <span className={'refbtn' + (isRef ? ' on' : '')} onClick={() => !isRef && changeReference(cid)}>{isRef ? 'Reference' : 'Set ref'}</span>
-              <span className="rm" title={isRef ? 'The reference capture cannot be removed' : 'Remove capture'} style={isRef ? { opacity: 0.25, cursor: 'not-allowed' } : null} onClick={() => removeCap(cid)}><TrashIcon /></span>
-            </div>
-          );
-        })}
-      </div>
-      {remaining.length > 0 && (
-        <div className="xcap-establish">
-          <select className="sel" style={{ maxWidth: 220 }} value="" onChange={(e) => establish(e.target.value)}>
-            <option value="">＋ Establish another capture…</option>
-            {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-      )}
     </div>
   );
 }
