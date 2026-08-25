@@ -1382,8 +1382,8 @@ const SHAPE_FEATURES = {
   edge:     { points: perLine('Line', 3, ['Start', 'End', 'Middle']), lines: ['Line 1', 'Line 2', 'Line 3'], closed: false },
   peak:     { points: ['Peak coordinate'], lines: [], closed: false },
 };
-// Shape-level scalar keys (the measurable outputs a shape emits; used by the Length dimension's sub-dropdown).
-// Length dimension — the length-type keys a shape exposes (no angle keys).
+// Shape-level scalar keys (the measurable outputs a shape emits; the length half of the Shape Features sub-dropdown).
+// The length-type keys a shape exposes (no angle keys); Area is appended for 2d shapes by featureKeysOf.
 const SHAPE_KEYS = {
   circle:   ['Radius', 'Diameter', 'Perimeter'],
   line:     ['Length'],
@@ -1411,16 +1411,24 @@ const SHAPE_DIMS = {
   quad:     ['0d', '1d', '2d'],
 };
 // Type config. param = dimensionality of the parameter(s) consumed (or 'closed' = whole closed shape); two = needs two features;
-// keyPick = a 2nd dropdown lists the chosen shape's scalar keys (Length only). Feature dropdowns list SHAPES filtered by param.
-// Angle → two 1d, Distance → two 0d, Area → one 2d, Length → one 1d, Convexity / ContourContinuity → closed shapes only.
+// keyPick = a 2nd dropdown lists the chosen shape's scalar keys. Feature dropdowns list SHAPES filtered by param.
+// Angle → two 1d, Distance → two 0d, Shape Features → one shape's own length/area, Convexity / ContourContinuity → closed shapes only.
+// "Shape Features" merges the former Length + Area: both describe a single shape (no second feature), so they live in one
+// section. Picking a shape reveals a sub-dropdown of that shape's measurable features — its length keys, plus Area for 2d shapes.
 const DIM_TYPE_CFG = {
   1: { name: 'Angle', param: '1d', two: true, gt: true, unit: '°', linePick: true },
   2: { name: 'Distance', param: '0d', two: true, gt: true, unit: 'mm', axis: true, cross: true },
-  3: { name: 'Area', param: '2d', two: false, gt: true, unit: 'mm²' },
-  4: { name: 'Length', param: '1d', two: false, gt: true, unit: 'mm', keyPick: true },
+  3: { name: 'Shape Features', param: '1d', two: false, gt: true, unit: 'mm', keyPick: true, area: true },
   5: { name: 'Convexity', param: 'closed', two: false, gt: false, unit: '' },
   6: { name: 'ContourContinuity', param: 'closed', two: false, gt: false, unit: '' },
 };
+// The measurable single-shape features a shape exposes: its length keys, plus Area when the shape is 2d (circle/ellipse/quad).
+const featureKeysOf = (shapeType) => {
+  const lens = SHAPE_KEYS[shapeType] || [];
+  return (SHAPE_DIMS[shapeType] || []).includes('2d') ? [...lens, 'Area'] : lens;
+};
+// Unit that suits the chosen feature: an area reads in mm², everything else keeps the type's default (mm).
+const unitForKey = (key, cfg) => (cfg.area && key === 'Area' ? 'mm²' : cfg.unit);
 const DIM_TYPE_OPTS = Object.entries(DIM_TYPE_CFG).map(([v, c]) => ({ v: Number(v), n: c.name }));
 const shapeQualifies = (shape, type) => {
   const cfg = DIM_TYPE_CFG[type];
@@ -1428,12 +1436,13 @@ const shapeQualifies = (shape, type) => {
   if (cfg.linePick) return ((SHAPE_FEATURES[shape.type] || {}).lines || []).length > 0;  // Angle needs a line/direction feature (excludes Circle & Peak)
   return (SHAPE_DIMS[shape.type] || []).includes(cfg.param);               // shape exposes a param of this dimensionality
 };
-// Length is the only type with a sub-dropdown — the chosen shape's scalar keys. Every other type picks a shape only.
+// Shape Features is the type with a sub-dropdown — the chosen shape's length keys (+ Area for 2d shapes). Others pick a shape only.
 const featuresOf = (shape, type) => {
-  if (!shape || !DIM_TYPE_CFG[type].keyPick) return [];
-  return SHAPE_KEYS[shape.type] || [];
+  const cfg = DIM_TYPE_CFG[type];
+  if (!shape || !cfg.keyPick) return [];
+  return cfg.area ? featureKeysOf(shape.type) : (SHAPE_KEYS[shape.type] || []);
 };
-// Seed the per-feature selector: Length→scalar key, Angle→first line, Distance→first 0d point.
+// Seed the per-feature selector: Shape Features→length/area key, Angle→first line, Distance→first 0d point.
 function defaultSelector(s, type) {
   const cfg = DIM_TYPE_CFG[type];
   if (!s) return '';
@@ -1535,8 +1544,8 @@ function seedDims(shapes) {
       captureTwoId: cap('Quadrilateral_1'), shapeTwoId: id('Quadrilateral_1'), shapeTwoSelector: 'Edge 1',
       operator: 1, targetValue: 90, tolerance: 0.5, unit: '°',
     }),
-    base(3, 'Area_1', {
-      captureOneId: cap('Ellipse_1'), shapeOneId: id('Ellipse_1'), shapeOneSelector: '',
+    base(3, 'Shape Features_1', {
+      captureOneId: cap('Ellipse_1'), shapeOneId: id('Ellipse_1'), shapeOneSelector: 'Area',
       operator: 2, targetValue: 2400, tolerance: 30, unit: 'mm²',
     }),
     base(5, 'Convexity_1', {
@@ -1947,20 +1956,20 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
   const twoShape = shapes.find((x) => x.id === node.shapeTwoId);
   const oneIsPeak = (oneShape || {}).type === 'peak';
   const twoIsPeak = (twoShape || {}).type === 'peak';
-  const oneIsLine = (oneShape || {}).type === 'line';
+  const twoIsLine = (twoShape || {}).type === 'line';
   const subOptsFor = (id) => {
     const s = shapes.find((x) => x.id === id); if (!s) return [];
-    if (cfg.keyPick) return SHAPE_KEYS[s.type] || [];
+    if (cfg.keyPick) return cfg.area ? featureKeysOf(s.type) : (SHAPE_KEYS[s.type] || []);
     if (cfg.linePick) return (SHAPE_FEATURES[s.type] || {}).lines || [];
     if (cfg.axis && s.type !== 'peak') return (SHAPE_FEATURES[s.type] || {}).points || [];
     return [];
   };
   const optsB = (() => {
     const base = subOptsFor(node.shapeTwoId);
-    if (!cfg.axis || twoIsPeak) return base;
-    const extra = ['nearest from previous point'];
-    if (oneIsLine) extra.push('perpendicular from previous point');
-    return [...base, ...extra];
+    // Only offered when Feature B is a Line: perpendicular from Feature A's point onto B's line
+    // (always uses the extended line). For a nearest point ON the segment, use point-to-point.
+    if (!cfg.axis || twoIsPeak || !twoIsLine) return base;
+    return [...base, 'perpendicular on the line'];
   })();
   const showSubA = (() => { const o = subOptsFor(node.shapeOneId); return cfg.linePick ? o.length > 1 : o.length > 0; })();
   const showSubB = cfg.linePick ? (subOptsFor(node.shapeTwoId).length > 1) : (optsB.length > 0);
@@ -2038,7 +2047,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
         {cfg.cross && captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
-          {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
+          {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value, ...(cfg.area ? { unit: unitForKey(e.target.value, cfg) } : {}) })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
         </div>
       </div>
       {twoFeatures && (
