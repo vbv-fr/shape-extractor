@@ -242,6 +242,21 @@
   .captbl .cname{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;}
   .captbl .cname .cd{width:9px;height:9px;border-radius:50%;flex:none;}
   .captbl .inp{width:100%;}
+  /* Cross Capture Dimensioning — one-time capture layout setup */
+  .xcap-note{font-size:12px;color:var(--muted);line-height:1.55;margin:0 0 12px;}
+  .xcap-canvaswrap{background:#eceef0;border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;justify-content:center;}
+  .xcaptbl{border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:12px;}
+  .xcaptbl .xh,.xcaptbl .xr{display:grid;grid-template-columns:1.5fr .95fr .95fr .8fr .8fr .55fr .4fr;gap:8px;align-items:center;padding:7px 10px;}
+  .xcaptbl .xh{background:var(--hdr);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);}
+  .xcaptbl .xr{border-top:1px solid var(--line);}
+  .xcaptbl .cname{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;}
+  .xcaptbl .cname .cd{width:9px;height:9px;border-radius:50%;flex:none;}
+  .xcaptbl .inp{width:100%;}
+  .xcaptbl .refbtn{cursor:pointer;font-size:10.5px;font-weight:700;color:var(--muted);border:1px solid var(--line-d);border-radius:20px;padding:2px 8px;text-align:center;background:#fff;}
+  .xcaptbl .refbtn.on{color:#fff;background:var(--orange);border-color:var(--orange);cursor:default;}
+  .xcaptbl .rm{cursor:pointer;color:var(--muted);text-align:center;font-size:13px;}
+  .xcaptbl .rm:hover{color:var(--red);}
+  .xcap-establish{display:flex;align-items:center;gap:8px;margin-top:10px;}
   .banner{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:16px;line-height:1.45;}
   .banner.warn{background:#fdECe8;color:#b8341f;border:1px solid #f3c4b8;}
   .banner.ok{background:#eef7ea;color:var(--green-d);border:1px solid #cdeabf;}
@@ -1463,10 +1478,12 @@ function defaultSelector(s, type) {
   if (type === 2) return s.type !== 'peak' ? (((SHAPE_FEATURES[s.type] || {}).points || [])[0] || '') : '';
   return '';
 }
-// Capture-aware defaults. Feature B always starts in Feature A's capture — the intra-capture
-// case stays a zero-extra-click flow; going cross-capture is a deliberate act.
-function typeDefaults(type, shapes, prefCapture) {
+// Capture-aware defaults. In the ordinary flow (allowCross false) Feature B stays in Feature A's
+// capture. In the Cross Capture Dimensioning flow (allowCross true) Feature B defaults to a DIFFERENT
+// capture — spanning captures is the whole point of that section.
+function typeDefaults(type, shapes, prefCapture, allowCross = false) {
   const cfg = DIM_TYPE_CFG[type];
+  const cross = !!(cfg.two && cfg.cross && allowCross);
   const valid = shapes.filter((s) => shapeQualifies(s, type));
   const capA = (prefCapture && valid.some((s) => s.captureId === prefCapture))
     ? prefCapture : (valid[0] ? valid[0].captureId : '');
@@ -1474,16 +1491,15 @@ function typeDefaults(type, shapes, prefCapture) {
   const s0 = inA[0];
   let capB = capA;
   let poolB = inA.filter((s) => !s0 || s.id !== s0.id);
-  // Only Distance may take its two features from different captures. Every other type is confined
-  // to one capture, so Feature B never leaves Feature A's capture.
-  if (cfg.two && cfg.cross && poolB.length === 0) {
+  if (cross) {
+    // prefer a different capture for Feature B; fall back to Feature A's capture if none other qualifies
     const alt = CAPTURES.find((c) => c.id !== capA && valid.some((s) => s.captureId === c.id));
     if (alt) { capB = alt.id; poolB = valid.filter((s) => s.captureId === capB); }
   }
   const s1 = poolB[0] || s0;
   return {
     captureOneId: capA, shapeOneId: s0 ? s0.id : '', shapeOneSelector: defaultSelector(s0, type),
-    captureTwoId: cfg.two ? (cfg.cross ? capB : capA) : '', shapeTwoId: cfg.two && s1 ? s1.id : '',
+    captureTwoId: cfg.two ? (cross ? capB : capA) : '', shapeTwoId: cfg.two && s1 ? s1.id : '',
     shapeTwoSelector: cfg.two ? defaultSelector(s1, type) : '',
     unit: cfg.unit,
   };
@@ -1494,9 +1510,21 @@ function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: DIM_TYPE_CFG[2].name + '_' + n,
     type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0,
+    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
+  };
+}
+// A cross-capture dimension: same shape as a normal dimension, but Feature B defaults to a different
+// capture. Only the two-feature types (Angle, Distance) can span captures.
+const CROSS_TYPE_OPTS = DIM_TYPE_OPTS.filter((o) => o.v === 1 || o.v === 2);
+function makeCrossDim(shapes, n) {
+  return {
+    id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Distance_' + n,
+    type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
+    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
+    okColor: '#56b733', ngColor: '#e0473a',
+    ...typeDefaults(2, shapes, undefined, true),
   };
 }
 
@@ -1530,7 +1558,7 @@ function seedDims(shapes) {
   const base = (type, name, over) => ({
     id: 'dim_' + Math.floor(rnd() * 1e6), name, type,
     distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0,
+    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
     okColor: '#56b733', ngColor: '#e0473a',
     captureOneId: '', shapeOneId: '', shapeOneSelector: '',
     captureTwoId: '', shapeTwoId: '', shapeTwoSelector: '', unit: 'mm',
@@ -1960,8 +1988,11 @@ const capturesUsed = (d) => {
 };
 
 /* One Capture → Feature → Point cascade. */
-function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
+function FeatureCascade({ node, patch, shapes, typeOpts, onType, allowCross = false }) {
   const cfg = DIM_TYPE_CFG[node.type];
+  // Cross-capture (each feature names its own capture) is offered ONLY inside the Cross Capture
+  // Dimensioning section. In the ordinary +Add Dimension flow a dimension stays within one capture.
+  const cross = !!cfg.cross && allowCross;
   const angleMode = node.angleMode || 'two features';
   const twoFeatures = cfg.linePick ? angleMode === 'two features' : cfg.two;
   const oneShape = shapes.find((x) => x.id === node.shapeOneId);
@@ -1989,7 +2020,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
 
   const capA = node.captureOneId || (CAPTURES[0] || {}).id;
   // a type that cannot span captures pins Feature B to Feature A's capture
-  const capB = cfg.cross ? (node.captureTwoId || capA) : capA;
+  const capB = cross ? (node.captureTwoId || capA) : capA;
   const shapesIn = (capId) => shapes.filter((s) => s.captureId === capId && shapeQualifies(s, node.type));
   // any capture of the variant may pair with any other — they are related through the capture layout,
   // not through matching resolution
@@ -2006,7 +2037,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       : { captureTwoId: capId, shapeTwoId: s0 ? s0.id : '', shapeTwoSelector: defaultSelector(s0, node.type) };
   };
   const changeCaptureA = (capId) => {
-    if (cfg.cross) return patch(seedFeature('one', capId));
+    if (cross) return patch(seedFeature('one', capId));
     // a type confined to one capture drags Feature B along with Feature A
     const list = shapesIn(capId);
     const s0 = list[0], s1 = list[1] || list[0];
@@ -2048,7 +2079,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       {/* A dimension confined to one capture picks it ONCE, for the whole dimension — it belongs to
           neither feature. Distance is the exception: each feature names its own, which is what lets
           the two differ. Either way the flow reads capture → shape → point. */}
-      {!cfg.cross && (
+      {!cross && (
         <div className="field">
           <span className="tinylab">Capture</span>
           {captureSelect(capA, capOptsA, changeCaptureA)}
@@ -2056,7 +2087,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       )}
       <div className="field">
         <span className="tinylab">{twoFeatures ? 'Feature A' : 'Feature'}</span>
-        {cfg.cross && captureSelect(capA, capOptsA, changeCaptureA)}
+        {cross && captureSelect(capA, capOptsA, changeCaptureA)}
         <div className="feat">
           {shapeSelect(node.shapeOneId, capA, (e) => changeShape('one', e.target.value))}
           {showSubA && <select className="sel" value={node.shapeOneSelector} onChange={(e) => patch({ shapeOneSelector: e.target.value, ...(cfg.area ? { unit: unitForKey(e.target.value, cfg) } : {}) })}>{subOptsFor(node.shapeOneId).map((f) => <option key={f}>{f}</option>)}</select>}
@@ -2065,7 +2096,7 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
       {twoFeatures && (
         <div className="field">
           <span className="tinylab">Feature B {crossCapture && <span className="xcap sm">⇄ CROSS-CAPTURE</span>}</span>
-          {cfg.cross && captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
+          {cross && captureSelect(capB, capOptsB, (v) => patch(seedFeature('two', v)))}
           <div className="feat">
             {shapeSelect(node.shapeTwoId, capB, (e) => changeShape('two', e.target.value))}
             {showSubB && <select className="sel" value={node.shapeTwoSelector} onChange={(e) => patch({ shapeTwoSelector: e.target.value })}>{optsB.map((f) => <option key={f}>{f}</option>)}</select>}
@@ -2077,77 +2108,22 @@ function FeatureCascade({ node, patch, shapes, typeOpts, onType }) {
   );
 }
 
-// Dimension config form: features, then the capture layout they are related through, then ground truth.
-function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
+// Dimension config form: features, then ground truth. The capture layout (pixel-to-mm, orientation,
+// separation) is authored ONCE in Cross Capture Dimensioning, not here — so this form never repeats it.
+function DimensionForm({ draft, setDraft, shapes, layout, setLayout, allowCross = false, typeOpts = DIM_TYPE_OPTS }) {
   const cfg = DIM_TYPE_CFG[draft.type];
   const patch = (p) => setDraft({ ...draft, ...p });
   const namePrefix = cfg.name + '_';
   const nameSuffix = draft.name.startsWith(namePrefix) ? draft.name.slice(namePrefix.length) : draft.name;
   const changeType = (type) => patch({ type, name: DIM_TYPE_CFG[type].name + '_' + nameSuffix,
-    ...typeDefaults(type, shapes, draft.captureOneId) });
+    ...typeDefaults(type, shapes, draft.captureOneId, allowCross) });
 
   const caps = capturesUsed(draft);
-  const ref = layout.referenceId;
   const setRatio = (id, v) => setLayout({ ...layout, ratio: { ...layout.ratio, [id]: v } });
-  const setAngle = (id, v) => setLayout({ ...layout, angle: { ...layout.angle, [id]: v } });
-  const setOffset = (id, k, v) => setLayout({ ...layout,
-    offset: { ...layout.offset, [id]: { ...(layout.offset[id] || { x: 0, y: 0 }), [k]: v } } });
-  // Changing the reference re-expresses every separation against the new origin, overriding what was
-  // entered before: the new reference becomes (0, 0) and the old one picks up the inverse.
-  const changeReference = (newRef) => {
-    const base = layout.offset[newRef] || { x: 0, y: 0 };
-    const next = {};
-    CAPTURES.forEach((c) => {
-      const o = layout.offset[c.id] || { x: 0, y: 0 };
-      next[c.id] = { x: o.x - base.x, y: o.y - base.y };
-    });
-    setLayout({ ...layout, referenceId: newRef, offset: next });
-  };
-  const others = caps.filter((c) => c !== ref);
 
   return (
     <div style={{ padding: '4px 2px' }}>
-      <FeatureCascade node={draft} patch={patch} shapes={shapes} typeOpts={DIM_TYPE_OPTS} onType={changeType} />
-
-      {/* ---- the capture layout only exists to relate TWO captures; a single-capture dimension
-              needs nothing but its scale, which is asked for with the ground truth below ---- */}
-      {caps.length > 1 && (
-        <Fragment>
-          <div className="block-t" style={{ marginTop: 12 }}>Capture Setup <span className="ln" /></div>
-          <div className="captbl">
-            <div className="cth"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span></div>
-            {caps.map((cid) => (
-              <div className="ctr" key={cid}>
-                <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
-                <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2}
-                  onChange={(e) => setRatio(cid, Math.max(0, Number(e.target.value)))} />
-                <SignedNumber value={layout.angle[cid] ?? 0} onChange={(v) => setAngle(cid, v)} />
-              </div>
-            ))}
-          </div>
-
-          <div className="block-t" style={{ marginTop: 12 }}>Capture Separation <span className="ln" /></div>
-          <div className="field">
-            <span className="tinylab">Reference capture</span>
-            <select className="sel" value={ref} onChange={(e) => changeReference(e.target.value)}>
-              {CAPTURES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="captbl">
-            <div className="cth"><span>From {capLabel(ref)}</span>
-              <span>X (mm)<span className="eyehint" title="Measured left to right. A positive X places this capture to the right of the reference capture."><InfoIcon /></span></span>
-              <span>Y (mm)<span className="eyehint" title="Measured bottom to top. A positive Y places this capture above the reference capture."><InfoIcon /></span></span>
-            </div>
-            {others.map((cid) => (
-              <div className="ctr" key={cid}>
-                <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
-                <SignedNumber value={(layout.offset[cid] || {}).x ?? 0} onChange={(v) => setOffset(cid, 'x', v)} />
-                <SignedNumber value={(layout.offset[cid] || {}).y ?? 0} onChange={(v) => setOffset(cid, 'y', v)} />
-              </div>
-            ))}
-          </div>
-        </Fragment>
-      )}
+      <FeatureCascade node={draft} patch={patch} shapes={shapes} typeOpts={typeOpts} onType={changeType} allowCross={allowCross} />
 
       <div className="block-t" style={{ marginTop: 12 }}>Dimension Name <span className="ln" /></div>
       <div className="field">
@@ -2199,12 +2175,167 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout }) {
           {LABEL_SIZE_OPTS.map((o) => <option key={o.px} value={o.px}>{o.n}</option>)}
         </select>
       </div>
+      <div className="block-t" style={{ marginTop: 8 }}>Offset <span className="ln" /></div>
+      <div className="field">
+        <span className="tinylab">Offset ({draft.unit || 'mm'})</span>
+        <SignedNumber value={draft.offset ?? 0} onChange={(v) => patch({ offset: v })} />
+        <div className="hint">A fixed correction added to this dimension's measured value before it is checked against the ground truth.</div>
+      </div>
+    </div>
+  );
+}
+
+// One-time capture layout for cross-capture dimensioning: establish each capture (pixel-to-mm,
+// orientation, and where its centre sits relative to the reference capture) and place them on a
+// millimetre canvas. Every cross-capture dimension then reuses this layout instead of re-declaring it.
+function CaptureLayoutSetup({ layout, setLayout, activeCaps, setActiveCaps }) {
+  const ref = layout.referenceId;
+  const drag = useRef(null);
+  const setRatio = (id, v) => setLayout({ ...layout, ratio: { ...layout.ratio, [id]: Math.max(0, v) } });
+  const setAngle = (id, v) => setLayout({ ...layout, angle: { ...layout.angle, [id]: v } });
+  const setOff = (id, k, v) => setLayout({ ...layout, offset: { ...layout.offset, [id]: { ...(layout.offset[id] || { x: 0, y: 0 }), [k]: v } } });
+  // Changing the reference re-expresses every separation against the new origin: the new reference
+  // becomes (0, 0) and every other capture picks up the difference.
+  const changeReference = (newRef) => {
+    const b = layout.offset[newRef] || { x: 0, y: 0 };
+    const next = { ...layout.offset };
+    activeCaps.forEach((id) => { const o = layout.offset[id] || { x: 0, y: 0 }; next[id] = { x: o.x - b.x, y: o.y - b.y }; });
+    setLayout({ ...layout, referenceId: newRef, offset: next });
+  };
+  const remaining = CAPTURES.filter((c) => !activeCaps.includes(c.id));
+  const establish = (id) => {
+    if (!id) return;
+    setLayout((L) => ({ ...L,
+      ratio: { ...L.ratio, [id]: L.ratio[id] ?? 0.2 },
+      angle: { ...L.angle, [id]: L.angle[id] ?? 0 },
+      offset: { ...L.offset, [id]: L.offset[id] ?? { x: 0, y: 0 } } }));
+    setActiveCaps((p) => [...p, id]);
+  };
+  const removeCap = (id) => { if (id !== ref) setActiveCaps((p) => p.filter((x) => x !== id)); };
+
+  // ---- place every established capture's footprint in the mm world, then fit the lot to the viewport ----
+  const placed = activeCaps.map((cid) => {
+    const mm = capMM(layout, cid);
+    const off = offInternal(layout, cid);
+    const ang = layout.angle[cid] || 0;
+    const a = (ang * Math.PI) / 180, cs = Math.cos(a), sn = Math.sin(a);
+    const corners = [[-mm.w / 2, -mm.h / 2], [mm.w / 2, -mm.h / 2], [mm.w / 2, mm.h / 2], [-mm.w / 2, mm.h / 2]]
+      .map(([x, y]) => [off.x + x * cs - y * sn, off.y + x * sn + y * cs]);
+    return { cid, mm, off, ang, corners };
+  });
+  const pts = placed.flatMap((p) => p.corners);
+  const minX = Math.min(0, ...pts.map((q) => q[0])), maxX = Math.max(0, ...pts.map((q) => q[0]));
+  const minY = Math.min(0, ...pts.map((q) => q[1])), maxY = Math.max(0, ...pts.map((q) => q[1]));
+  const wW = Math.max(1, maxX - minX), wH = Math.max(1, maxY - minY);
+  const pad = 40;
+  const k = Math.min((IMG_W - pad * 2) / wW, (IMG_H - pad * 2) / wH);
+  const ox = pad + (IMG_W - pad * 2 - wW * k) / 2 - minX * k;
+  const oy = pad + (IMG_H - pad * 2 - wH * k) / 2 - minY * k;
+  const W2V = (w) => [ox + w[0] * k, oy + w[1] * k];
+  const imgT = (p) => `translate(${ox},${oy}) scale(${k}) translate(${p.off.x},${p.off.y}) rotate(${p.ang}) ` +
+    `translate(${-p.mm.w / 2},${-p.mm.h / 2}) scale(${p.mm.w / IMG_W},${p.mm.h / IMG_H})`;
+
+  const startDrag = (cid, e) => {
+    if (cid === ref) return;
+    e.preventDefault();
+    drag.current = { cid, sx: e.clientX, sy: e.clientY, so: { ...(layout.offset[cid] || { x: 0, y: 0 }) }, k };
+  };
+  useEffect(() => {
+    const move = (e) => {
+      const d = drag.current; if (!d) return;
+      const nx = Math.round((d.so.x + (e.clientX - d.sx) / d.k) * 10) / 10;
+      const ny = Math.round((d.so.y - (e.clientY - d.sy) / d.k) * 10) / 10;  // screen-down → smaller Y (Y reads bottom-to-top)
+      setLayout((L) => ({ ...L, offset: { ...L.offset, [d.cid]: { x: nx, y: ny } } }));
+    };
+    const up = () => { drag.current = null; };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+  }, [setLayout]);
+
+  const origin = W2V([0, 0]);
+  const barMM = (() => {
+    const target = (IMG_W * 0.25) / k;
+    const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000];
+    return steps.reduce((best, v) => Math.abs(v - target) < Math.abs(best - target) ? v : best, steps[0]);
+  })();
+
+  return (
+    <div>
+      <div className="xcap-note">
+        There is usually a fixed rig of several cameras. Establish each capture <b>once</b> — its pixel-to-mm ratio,
+        orientation, and where its <b>centre</b> sits relative to the reference capture — then every cross-capture
+        dimension reuses this layout. Separation is entered as the reference capture's origin: <b>X</b> left-to-right,
+        <b> Y</b> bottom-to-top (in mm). <b>Drag</b> a capture on the canvas to place it, or type X / Y below.
+      </div>
+      <div className="xcap-canvaswrap">
+        <div className="frame">
+          <span className="flabel">PLANT LAYOUT · mm</span>
+          <svg width={IMG_W} height={IMG_H} viewBox={`0 0 ${IMG_W} ${IMG_H}`}>
+            <rect width={IMG_W} height={IMG_H} fill="#0b0e11" />
+            <defs>{placed.map((p) => <clipPath key={p.cid} id={'cl-' + p.cid}><rect x="0" y="0" width={IMG_W} height={IMG_H} /></clipPath>)}</defs>
+            {/* reference origin crosshair */}
+            <g stroke="#39424d" strokeWidth="1">
+              <line x1={origin[0] - 10} y1={origin[1]} x2={origin[0] + 10} y2={origin[1]} />
+              <line x1={origin[0]} y1={origin[1] - 10} x2={origin[0]} y2={origin[1] + 10} />
+            </g>
+            {placed.map((p) => {
+              const c = capById(p.cid), isRef = p.cid === ref;
+              const tl = W2V(p.corners[0]);
+              return (
+                <g key={p.cid} style={{ cursor: isRef ? 'default' : 'move' }} onMouseDown={(e) => startDrag(p.cid, e)}>
+                  <g transform={imgT(p)}>
+                    <g clipPath={`url(#cl-${p.cid})`}><CaptureRender cap={c} pfx={'x' + p.cid} /></g>
+                  </g>
+                  <polygon points={p.corners.map((q) => W2V(q).join(',')).join(' ')} fill="none" stroke={c.tint} strokeWidth={isRef ? 2.2 : 1.4} strokeDasharray={isRef ? '' : '5 3'} />
+                  <g>
+                    <rect x={tl[0]} y={tl[1] - 15} width={isRef ? 92 : 62} height="14" rx="7" fill={c.tint} />
+                    <text x={tl[0] + (isRef ? 46 : 31)} y={tl[1] - 7.5} fill="#10141a" fontSize="9" fontWeight="800" textAnchor="middle" dominantBaseline="middle">{c.name}{isRef ? ' · REF' : ''}</text>
+                  </g>
+                </g>
+              );
+            })}
+            <g transform={`translate(14,${IMG_H - 16})`}>
+              <line x1="0" y1="0" x2={barMM * k} y2="0" stroke="#c6ced8" strokeWidth="2" />
+              <line x1="0" y1="-4" x2="0" y2="4" stroke="#c6ced8" strokeWidth="2" />
+              <line x1={barMM * k} y1="-4" x2={barMM * k} y2="4" stroke="#c6ced8" strokeWidth="2" />
+              <text x={barMM * k / 2} y="-7" fill="#c6ced8" fontSize="10" fontWeight="700" textAnchor="middle">{barMM} mm</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+
+      <div className="xcaptbl">
+        <div className="xh"><span>Capture</span><span>Pixel to mm</span><span>Orientation°</span><span>X (mm)</span><span>Y (mm)</span><span>Reference</span><span></span></div>
+        {activeCaps.map((cid) => {
+          const isRef = cid === ref;
+          return (
+            <div className="xr" key={cid}>
+              <span className="cname"><span className="cd" style={{ background: capById(cid).tint }} />{capLabel(cid)}</span>
+              <input className="inp" type="number" min="0" step="0.001" value={layout.ratio[cid] ?? 0.2} onChange={(e) => setRatio(cid, Number(e.target.value))} />
+              <SignedNumber value={layout.angle[cid] ?? 0} onChange={(v) => setAngle(cid, v)} />
+              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).x ?? 0} onChange={(v) => !isRef && setOff(cid, 'x', v)} />
+              <SignedNumber value={isRef ? 0 : (layout.offset[cid] || {}).y ?? 0} onChange={(v) => !isRef && setOff(cid, 'y', v)} />
+              <span className={'refbtn' + (isRef ? ' on' : '')} onClick={() => !isRef && changeReference(cid)}>{isRef ? 'Reference' : 'Set ref'}</span>
+              <span className="rm" title={isRef ? 'The reference capture cannot be removed' : 'Remove capture'} style={isRef ? { opacity: 0.25, cursor: 'not-allowed' } : null} onClick={() => removeCap(cid)}><TrashIcon /></span>
+            </div>
+          );
+        })}
+      </div>
+      {remaining.length > 0 && (
+        <div className="xcap-establish">
+          <select className="sel" style={{ maxWidth: 220 }} value="" onChange={(e) => establish(e.target.value)}>
+            <option value="">＋ Establish another capture…</option>
+            {remaining.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      )}
     </div>
   );
 }
 
 // Dimension Configuration: table list ↔ add/edit sub-page
-function DimensionConfig({ dims, setDims, shapes, layout, setLayout }) {
+function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps, setActiveCaps }) {
   const [view, setView] = useState('list');
   const [draft, setDraft] = useState(null);
   const [editId, setEditId] = useState(null);
@@ -2219,13 +2350,17 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout }) {
     return null;
   };
   const errored = dims.filter(dimError);
+  const singleDims = dims.filter((d) => !isCrossCapture(d));
+  const crossDims = dims.filter(isCrossCapture);
   const startAdd = () => { setDraft(makeDim(shapes, dims.length + 1)); setEditId(null); setView('edit'); };
-  const startEdit = (d) => { setDraft(clone(d)); setEditId(d.id); setView('edit'); };
-  const saveDraft = () => {
+  const startAddCross = () => { setDraft(makeCrossDim(shapes, dims.length + 1)); setEditId(null); setView('xedit'); };
+  const startEdit = (d) => { setDraft(clone(d)); setEditId(d.id); setView(isCrossCapture(d) ? 'xedit' : 'edit'); };
+  const saveDraft = (backView) => {
     setDims((p) => editId ? p.map((d) => d.id === editId ? draft : d) : [...p, draft]);
-    setView('list'); setDraft(null); setEditId(null);
+    setView(backView); setDraft(null); setEditId(null);
   };
   const remove = (id) => setDims((p) => p.filter((d) => d.id !== id));
+  const offCell = (d) => (d.offset ? `${d.offset > 0 ? '+' : ''}${d.offset} ${d.unit}` : '—');
 
   if (view === 'edit' && draft) {
     return (
@@ -2243,7 +2378,30 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout }) {
         </div>
         <div className="emc-foot">
           <button className="btn btn-ghost sm" onClick={() => setView('list')}>Cancel</button>
-          <button className="btn btn-primary sm" onClick={saveDraft}>Save Dimension</button>
+          <button className="btn btn-primary sm" onClick={() => saveDraft('list')}>Save Dimension</button>
+        </div>
+      </div>
+    );
+  }
+  // Add / edit a CROSS-CAPTURE dimension — same form, but Feature A and Feature B each name their own
+  // capture, and the capture layout is read from the Setup above (not re-entered here).
+  if (view === 'xedit' && draft) {
+    return (
+      <div className="dimedit">
+        <div className="dimedit-hd">
+          <button className="linkback" onClick={() => setView('xcap')}>← Cross Capture Dimensioning</button>
+          <span>{editId ? 'Edit' : 'Add'} Cross Capture Dimension</span>
+        </div>
+        <div className="dimedit-split">
+          <div className="dimedit-form"><DimensionForm draft={draft} setDraft={setDraft} shapes={shapes} layout={layout} setLayout={setLayout} allowCross={true} typeOpts={CROSS_TYPE_OPTS} /></div>
+          <div className="emc-canvas">
+            <div className="canvas-tools"><div className="ct">◳ Fit</div><div className="ct" style={{ color: 'var(--orange)' }}>▧ {draft.name}</div></div>
+            <DimensionCanvas dim={draft} shapes={shapes} layout={layout} />
+          </div>
+        </div>
+        <div className="emc-foot">
+          <button className="btn btn-ghost sm" onClick={() => setView('xcap')}>Cancel</button>
+          <button className="btn btn-primary sm" onClick={() => saveDraft('xcap')}>Save Dimension</button>
         </div>
       </div>
     );
@@ -2253,53 +2411,87 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout }) {
       <div className="dimedit">
         <div className="dimedit-hd">
           <button className="linkback" onClick={() => setView('list')}>← Dimension Configuration</button>
-          <span>Cross-Capture Dimensioning</span>
+          <span>Cross Capture Dimensioning</span>
         </div>
-        <div className="dimlist" style={{ padding: '18px' }}>
-          <div className="banner ok">⇄ Cross-Capture Dimensioning — section shell in place. Scope to be defined next.</div>
+        <div className="dimlist">
+          <div className="block-t">Capture Layout Setup <span className="ln" /></div>
+          <CaptureLayoutSetup layout={layout} setLayout={setLayout} activeCaps={activeCaps} setActiveCaps={setActiveCaps} />
+
+          <div className="dimlist-hd" style={{ marginTop: 24 }}>
+            <div className="t">Cross-Capture Dimensions</div>
+            <button className="btn btn-primary sm" onClick={startAddCross}>＋ Add Cross Capture Dimension</button>
+          </div>
+          {crossDims.length === 0
+            ? <div className="banner ok">No cross-capture dimensions yet. Add one to measure between features that sit on two different captures.</div>
+            : (
+              <table className="dimtable">
+                <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Captures</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th>Offset</th><th></th></tr></thead>
+                <tbody>
+                  {crossDims.map((d, i) => {
+                    const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
+                    const err = dimError(d), dCaps = capturesUsed(d);
+                    return (
+                      <tr key={d.id} style={err ? { background: '#fdf3f1' } : null}>
+                        <td>{i + 1}</td>
+                        <td><span className="dot" style={{ background: d.okColor }} />{d.name}
+                          {err && <div style={{ color: 'var(--red)', fontSize: 10.5, fontWeight: 700, marginTop: 2 }}>⚠ {err}</div>}</td>
+                        <td>{cfg.name}</td>
+                        <td><span className="xcap sm">{dCaps.map(capLabel).join(' ⇄ ')}</span></td>
+                        <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
+                        <td>{shapeName(d.shapeTwoId)}{d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}</td>
+                        <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
+                        <td>{offCell(d)}</td>
+                        <td className="acts">
+                          <span title="Edit" onClick={() => startEdit(d)}>✎</span>
+                          <span title="Delete" onClick={() => remove(d.id)}><TrashIcon /></span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
         </div>
       </div>
     );
   }
   return (
     <div className="dimlist">
-      {dims.length === 0
+      {singleDims.length === 0 && crossDims.length === 0
         ? <div className="banner warn">⚠ No dimensions configured for this variant. A variant whose Shape Extractor has no dimensions <b>cannot be deployed</b> — add at least one before deploying.</div>
         : errored.length > 0
           ? <div className="banner warn">⚠ {errored.length} dimension{errored.length > 1 ? 's' : ''} point at a shape that no longer exists. <b>Deployment is blocked</b> until each one is re-pointed at another shape or deleted.</div>
-          : <div className="banner ok">✓ {dims.length} dimension{dims.length > 1 ? 's' : ''} configured for this variant · {dims.filter(isCrossCapture).length} across captures.</div>}
+          : <div className="banner ok">✓ {dims.length} dimension{dims.length > 1 ? 's' : ''} configured for this variant · {crossDims.length} across captures.</div>}
       <div style={{ fontSize: 12, color: 'var(--muted)', margin: '-6px 0 14px', lineHeight: 1.5 }}>
-        Dimensions are configured for the whole <b>variant</b>. A dimension may take its two features from
-        different captures, provided those captures have identical image dimensions.
+        These dimensions each measure a feature within a <b>single</b> capture. To measure between two
+        different captures, use <b>Cross Capture Dimensioning</b> (top right) — the capture layout is set up once there.
       </div>
       <div className="dimlist-hd">
         <div className="t">Dimensions</div>
         <div className="hd-actions">
-          <button className="btn btn-ghost sm" onClick={() => setView('xcap')}>⇄ Cross-Capture Dimensioning</button>
+          <button className="btn btn-ghost sm" onClick={() => setView('xcap')}>⇄ Cross Capture Dimensioning</button>
           <button className="btn btn-primary sm" onClick={startAdd}>＋ Add Dimension</button>
         </div>
       </div>
-      {dims.length > 0 && (
+      {singleDims.length > 0 && (
         <table className="dimtable">
-          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capture</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capture</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th>Offset</th><th></th></tr></thead>
           <tbody>
-            {dims.map((d, i) => {
+            {singleDims.map((d, i) => {
               const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
               const two = d.type === 1 ? (d.angleMode || 'two features') === 'two features' : cfg.two;
-              const x = isCrossCapture(d), err = dimError(d);
-              const dCaps = capturesUsed(d);
+              const err = dimError(d);
               return (
                 <tr key={d.id} style={err ? { background: '#fdf3f1' } : null}>
                   <td>{i + 1}</td>
                   <td><span className="dot" style={{ background: d.okColor }} />{d.name}
                     {err && <div style={{ color: 'var(--red)', fontSize: 10.5, fontWeight: 700, marginTop: 2 }}>⚠ {err}</div>}</td>
                   <td>{cfg.name}</td>
-                  <td>{x
-                    ? <span className="xcap sm">{dCaps.map(capLabel).join(' ⇄ ')}</span>
-                    : capLabel(d.captureOneId)}</td>
+                  <td>{capLabel(d.captureOneId)}</td>
                   <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
                   <td>{two ? `${shapeName(d.shapeTwoId)}${d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}` : '—'}</td>
                   <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
+                  <td>{offCell(d)}</td>
                   <td className="acts">
                     <span title="Edit" onClick={() => startEdit(d)}>✎</span>
                     <span title="Delete" onClick={() => remove(d.id)}><TrashIcon /></span>
@@ -2320,6 +2512,7 @@ function EdgeShell({ toast }) {
   const [dims, setDims] = useState(() => seedDims(shapes));
   const [emcCap, setEmcCap] = useState(CAPTURES[0].id);   // Edit Module Configurations is per capture
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);   // capture layout — variant scope, shared by every dimension
+  const [activeCaps, setActiveCaps] = useState(['cap1', 'cap2', 'cap3']);   // captures established in the cross-capture layout
   const [sel, setSel] = useState(() => shapes.find((s) => s.captureId === CAPTURES[0].id).id);
   const [dirty, setDirty] = useState(false);
   const [reviewModal, setReviewModal] = useState(false);
@@ -2373,7 +2566,7 @@ function EdgeShell({ toast }) {
       <div className="emc-body">
         {tab === 'emc'
           ? <EdgeShapeEditor shapes={capShapes} setShapes={setShapes} sel={sel} setSel={setSel} onDirty={() => setDirty(true)} />
-          : <DimensionConfig dims={dims} setDims={setDims} shapes={shapes} layout={layout} setLayout={setLayout} />}
+          : <DimensionConfig dims={dims} setDims={setDims} shapes={shapes} layout={layout} setLayout={setLayout} activeCaps={activeCaps} setActiveCaps={setActiveCaps} />}
       </div>
 
       {tab === 'emc' && (
