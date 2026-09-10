@@ -205,6 +205,10 @@
   .dimcard .dh{font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
   .dimcard .dh .chip.num{width:19px;height:19px;border-radius:50%;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;}
   .gtgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+  .gtrow{display:flex;align-items:center;gap:8px;}
+  .gtrow .inp{flex:1;min-width:0;}
+  .gtrow .andsep{font-size:12px;font-weight:600;color:var(--muted);flex:none;}
+  .gtrow .unitsel{width:78px;flex:none;}
   .feat{display:flex;gap:8px;}
   .feat .roinput{flex:1;}
   .feat .sel{flex:1;min-width:0;}
@@ -1510,7 +1514,7 @@ function makeDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: DIM_TYPE_CFG[2].name + '_' + n,
     type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
+    gtLow: 0, gtHigh: 0, offset: 0,
     okColor: '#56b733', ngColor: '#e0473a',   // inference line colours
     ...typeDefaults(2, shapes),
   };
@@ -1522,7 +1526,7 @@ function makeCrossDim(shapes, n) {
   return {
     id: 'dim_' + Math.floor(rnd() * 1e6), name: 'Distance_' + n,
     type: 2, distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
+    gtLow: 0, gtHigh: 0, offset: 0,
     okColor: '#56b733', ngColor: '#e0473a',
     ...typeDefaults(2, shapes, undefined, true),
   };
@@ -1558,7 +1562,7 @@ function seedDims(shapes) {
   const base = (type, name, over) => ({
     id: 'dim_' + Math.floor(rnd() * 1e6), name, type,
     distanceAxis: 'euclidean', angleMode: 'two features', labelSize: 14,
-    operator: 1, targetValue: 0, tolerance: 0, offset: 0,
+    gtLow: 0, gtHigh: 0, offset: 0,
     okColor: '#56b733', ngColor: '#e0473a',
     captureOneId: '', shapeOneId: '', shapeOneSelector: '',
     captureTwoId: '', shapeTwoId: '', shapeTwoSelector: '', unit: 'mm',
@@ -1570,23 +1574,23 @@ function seedDims(shapes) {
       distanceAxis: 'x',
       captureOneId: cap('EdgeSearch_1'), shapeOneId: id('EdgeSearch_1'), shapeOneSelector: 'Line 1 · Middle',
       captureTwoId: cap('Circle_1'), shapeTwoId: id('Circle_1'), shapeTwoSelector: 'Centre',
-      operator: 1, targetValue: 22.8, tolerance: 0.4, unit: 'mm',
+      gtLow: 22.4, gtHigh: 23.2, unit: 'mm',
     }),
     // two captures metres apart, different resolutions, one of them mounted at an angle
     base(2, 'Distance_2', {
       distanceAxis: 'euclidean',
       captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Start',
       captureTwoId: cap('Circle_2'), shapeTwoId: id('Circle_2'), shapeTwoSelector: 'Centre',
-      operator: 1, targetValue: 320.7, tolerance: 2, unit: 'mm',
+      gtLow: 318.7, gtHigh: 322.7, unit: 'mm',
     }),
     base(1, 'Angle_1', {
       captureOneId: cap('Line_1'), shapeOneId: id('Line_1'), shapeOneSelector: 'Whole line',
       captureTwoId: cap('Quadrilateral_1'), shapeTwoId: id('Quadrilateral_1'), shapeTwoSelector: 'Edge 1',
-      operator: 1, targetValue: 90, tolerance: 0.5, unit: '°',
+      gtLow: 89.5, gtHigh: 90.5, unit: '°',
     }),
     base(3, 'Shape Features_1', {
       captureOneId: cap('Ellipse_1'), shapeOneId: id('Ellipse_1'), shapeOneSelector: 'Area',
-      operator: 2, targetValue: 2400, tolerance: 30, unit: 'mm²',
+      gtLow: 2370, gtHigh: 2430, unit: 'mm²',
     }),
     base(5, 'Convexity_1', {
       captureOneId: cap('Circle_1'), shapeOneId: id('Circle_1'), shapeOneSelector: '', unit: '',
@@ -2137,12 +2141,14 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout, allowCross 
       {cfg.gt && (
         <>
           <div className="block-t" style={{ marginTop: 8 }}>Ground Truth <span className="ln" /></div>
-          <div className="gtgrid">
-            <div><span className="tinylab">Operator</span>
-              <select className="sel" value={draft.operator} onChange={(e) => patch({ operator: Number(e.target.value) })}><option value={1}>=</option><option value={2}>&gt;</option><option value={3}>&lt;</option></select></div>
-            <div><span className="tinylab">Value</span><input className="inp" type="number" min="0" value={draft.targetValue} onChange={(e) => patch({ targetValue: Math.max(0, Number(e.target.value)) })} /></div>
-            <div><span className="tinylab">Tolerance</span><input className="inp" type="number" min="0" value={draft.tolerance} onChange={(e) => patch({ tolerance: Math.max(0, Number(e.target.value)) })} /></div>
-            <div><span className="tinylab">Unit</span><select className="sel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select></div>
+          <div className="field">
+            <span className="tinylab">GT range — measured value must fall between</span>
+            <div className="gtrow">
+              <input className="inp" type="number" min="0" step="0.0001" value={draft.gtLow} onChange={(e) => patch({ gtLow: Math.round(Math.max(0, Number(e.target.value)) * 1e4) / 1e4 })} />
+              <span className="andsep">and</span>
+              <input className="inp" type="number" min="0" step="0.0001" value={draft.gtHigh} onChange={(e) => patch({ gtHigh: Math.round(Math.max(0, Number(e.target.value)) * 1e4) / 1e4 })} />
+              <select className="sel unitsel" value={draft.unit} onChange={(e) => patch({ unit: e.target.value })}>{UNIT_OPTS.map((u) => <option key={u}>{u}</option>)}</select>
+            </div>
           </div>
           {caps.length === 1 && draft.type !== 1 && (
             <div className="field" style={{ marginTop: 10 }}>
@@ -2177,9 +2183,10 @@ function DimensionForm({ draft, setDraft, shapes, layout, setLayout, allowCross 
       </div>
       <div className="block-t" style={{ marginTop: 8 }}>Offset <span className="ln" /></div>
       <div className="field">
-        <span className="tinylab">Offset ({draft.unit || 'mm'})</span>
+        <span className="tinylab">Offset ({draft.unit || 'mm'})
+          <span className="eyehint" title="The offset is added to the measured value; this sum is checked against the ground-truth range."><InfoIcon /></span>
+        </span>
         <SignedNumber value={draft.offset ?? 0} onChange={(v) => patch({ offset: v })} />
-        <div className="hint">A fixed correction added to this dimension's measured value before it is checked against the ground truth.</div>
       </div>
     </div>
   );
@@ -2451,7 +2458,7 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
                 <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Captures</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th>Offset</th><th></th></tr></thead>
                 <tbody>
                   {crossDims.map((d, i) => {
-                    const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
+                    const cfg = DIM_TYPE_CFG[d.type];
                     const err = dimError(d), dCaps = capturesUsed(d);
                     return (
                       <tr key={d.id} style={err ? { background: '#fdf3f1' } : null}>
@@ -2462,7 +2469,7 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
                         <td><span className="xcap sm">{dCaps.map(capLabel).join(' ⇄ ')}</span></td>
                         <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
                         <td>{shapeName(d.shapeTwoId)}{d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}</td>
-                        <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
+                        <td>{cfg.gt ? `${d.gtLow} – ${d.gtHigh} ${d.unit}` : '—'}</td>
                         <td>{offCell(d)}</td>
                         <td className="acts">
                           <span title="Edit" onClick={() => startEdit(d)}>✎</span>
@@ -2501,7 +2508,7 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
           <thead><tr><th>#</th><th>Name</th><th>Type</th><th>Capture</th><th>Feature A</th><th>Feature B</th><th>Ground Truth</th><th>Offset</th><th></th></tr></thead>
           <tbody>
             {singleDims.map((d, i) => {
-              const cfg = DIM_TYPE_CFG[d.type], op = { 1: '=', 2: '>', 3: '<' }[d.operator];
+              const cfg = DIM_TYPE_CFG[d.type];
               const two = d.type === 1 ? (d.angleMode || 'two features') === 'two features' : cfg.two;
               const err = dimError(d);
               return (
@@ -2513,7 +2520,7 @@ function DimensionConfig({ dims, setDims, shapes, layout, setLayout, activeCaps,
                   <td>{capLabel(d.captureOneId)}</td>
                   <td>{shapeName(d.shapeOneId)}{d.shapeOneSelector ? ` · ${d.shapeOneSelector}` : ''}</td>
                   <td>{two ? `${shapeName(d.shapeTwoId)}${d.shapeTwoSelector ? ` · ${d.shapeTwoSelector}` : ''}` : '—'}</td>
-                  <td>{cfg.gt ? `${op} ${d.targetValue} ± ${d.tolerance} ${d.unit}` : '—'}</td>
+                  <td>{cfg.gt ? `${d.gtLow} – ${d.gtHigh} ${d.unit}` : '—'}</td>
                   <td>{offCell(d)}</td>
                   <td className="acts">
                     <span title="Edit" onClick={() => startEdit(d)}>✎</span>
